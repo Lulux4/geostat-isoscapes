@@ -2,3 +2,4 @@ data/tests/
 output/
 src/geostat_isoscapes_tools.egg-info
 src/geostat_isoscapes_tools/__pycache__
+data/temperature/temp_800ka_ann.nc
