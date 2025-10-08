@@ -1,2 +1,4 @@
 data/tests/
 output/
+src/geostat_isoscapes_tools.egg-info
+src/geostat_isoscapes_tools/__pycache__

@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geostat-isoscapes-tools"
+version = "0.1.0"
+description = "Tools for isoscapes reconstruction using geostatistics on speleothem data."
+authors = [{ name = "Léa Gainon", email = "leagainon@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["src"]
