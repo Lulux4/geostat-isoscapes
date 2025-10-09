@@ -1,4 +1,5 @@
 import pandas as pd
+from pandas import DataFrame
 import os 
 
 def load_sisal():
@@ -44,53 +45,92 @@ def load_sisal():
             'entity_link_reference': entity_link_reference_df,
             'reference': reference_df }
 
-def get_valid_sisal_samples_with_age(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
-    ''' Cleaning the table "sample_df" of the SISAL database to keep only valid samples, based on these criterions : 
-    1) remove samples corresponding to superseded entities
-    2) remove samples with mixed mineralogy, keep only calcite or aragonite speleothems
-    3) remove samples with no "chrono" age where "chrono" refers to the chronology to use. 
+def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
+    ''' Cleaning the table "sample_df" of the SISAL database to keep only valid samples, based on these criterions :
+    1.  remove samples corresponding to superseded entities
+    2.  remove samples with mixed mineralogy, keep only calcite or aragonite speleothems
+    3.  remove samples with no "chrono" age where "chrono" refers to the chronology to use. 
+    4.  remove samples for which we do not have a d18O measurement
     Inputs :
         - sisal_dict : dict of the sisal database as returned by function load_sisal()
         - chrono : str referring to the chronology method of interest. 
                    Samples with no age provided by this chrono methods will be excluded.
-                   values : 'sisal-lin-interp','orig-chrono',... TODO
+                   values : 'sisal-lin-interp','orig-chrono',... 
     Output :
-        - vmin_vsample_vchrono_df : pandas dataframe containing the sample_df filtered for valid samples with valid age
-        - filtered_chrono_df : pandas dataframe containing the chronoogy dataframe filtered for valid samples with valid age
+        - clean_sisal_dict : dict containing ONLY the cleaned dataframes of sites, entities, samples, and chronology.
     '''
     # Extract the dfs from sisal dict 
+    site_df = sisal_dict['site']
     entity_df = sisal_dict['entity']
     sample_df = sisal_dict['sample']
+    d18O_df   = sisal_dict['d18O']
     if chrono == 'interp_age':
-        chronology_df = sisal_dict['original_chronology']
+        ckey = 'original_chronology'
     else :
-        chronology_df = sisal_dict['sisal_chronology']
-
+        ckey = 'sisal_chronology'
+    chronology_df = sisal_dict[ckey]
+    #############################
     # 1) Remove superseded entities and their samples
-    ventity_df = entity_df.loc[entity_df['entity_status']!='superseded']
-    vsample_df = sample_df[sample_df['entity_id'].isin(ventity_df['entity_id'].unique())]
-
+    entity_df1 = entity_df.loc[entity_df['entity_status']!='superseded']
+    sample_df1 = sample_df[sample_df['entity_id'].isin(entity_df1['entity_id'].unique())]
+    #############################
     # 2) Exclude samples of mixed mineralogy entities :
     #   Find how many different mineralogies exist in the samples of each entity :
-    unique_entities = vsample_df.groupby('entity_id')['mineralogy'].nunique() # dropna=False to count nan as a different value                                                                 
+    unique_entities = sample_df1.groupby('entity_id')['mineralogy'].nunique() # dropna=False to count nan as a different value                                                                 
     #   Keep only those with a single mineralogy
-    unique_min_sample_df = vsample_df[vsample_df['entity_id'].isin(unique_entities[unique_entities == 1].index)]
-    vmin_vsample_df = unique_min_sample_df[unique_min_sample_df['mineralogy'].isin(['calcite', 'aragonite','secondary calcite'])]
-
+    unique_min_sample_df = sample_df1[sample_df1['entity_id'].isin(unique_entities[unique_entities == 1].index)]
+    sample_df2 = unique_min_sample_df[unique_min_sample_df['mineralogy'].isin(['calcite', 'aragonite','secondary calcite'])]
+    #############################
     # 3) Keep only samples associated with a chronology age
-    filtered_chrono_df = chronology_df[   ( chronology_df['sample_id'].isin(vmin_vsample_df['sample_id']) ) 
-                                       & ~( pd.isna(chronology_df[chrono]) )
-                                        ]
-    vmin_vsamples_vchrono_array = filtered_chrono_df['sample_id'].unique()
-    vmin_vsample_vchrono_df = vmin_vsample_df[vmin_vsample_df['sample_id'].isin(vmin_vsamples_vchrono_array)]
+    chrono_df1 = chronology_df[( chronology_df['sample_id'].isin(sample_df2['sample_id']) ) 
+                               & ~( pd.isna(chronology_df[chrono]) )
+                               ]
+    sample_df3 = sample_df2[sample_df2['sample_id'].isin(chrono_df1['sample_id'])]
+    #############################
+    # 4) Keep only samples existing in d18O_df and having a non nan measurement
+    d18O_df1 = d18O_df.dropna(subset='d18O_measurement')
+    sample_df4 = sample_df3[(sample_df3['sample_id'].isin(d18O_df1['sample_id']))]
 
-    # Final sample df is : 
-    # merged_df = vmin_vsample_df[['entity_id','sample_id']].merge(filtered_chrono_df[['sample_id','lin_interp_age','lin_interp_age_uncert_neg','lin_interp_age_uncert_pos']], on='sample_id', how='left',)
-    # merged_df = merged_df.merge(vmin_entity_df[['entity_id','site_id']], on='entity_id', how='left',)
-    # data_df = merged_df.dropna(subset=['lin_interp_age'])#,'interp_age_uncert_neg','interp_age_uncert_pos'
 
-    # print('We have',len(data_df['entity_id'].unique()),'speleothems with lin_interp age and pure mineralogy')
-    # print(pure_entity_df.loc[~ pure_entity_df['entity_id'].isin(valid_df['entity_id']),['entity_id','site_id']])
+    final_entity_df = entity_df[entity_df['entity_id'].isin(sample_df4['entity_id'])]
+    final_chrono_df = chronology_df[chronology_df['sample_id'].isin(sample_df4['sample_id'])]
+    final_d18O_df = d18O_df[d18O_df['sample_id'].isin(sample_df4['sample_id'])]
+    final_site_df = site_df[site_df['site_id'].isin(final_entity_df['site_id'])]
+    
+    return {ckey : final_chrono_df,
+            'sample': sample_df4,
+            'entity': final_entity_df,
+            'd18O': final_d18O_df,
+            'site': final_site_df,
+            }
 
-    # update the sisal dict (maybe i should do it another way or return only the samples idx array?)
-    return vmin_vsample_vchrono_df,filtered_chrono_df
+def merge_sisal_df_with_columns(site_df   : DataFrame,
+                                entity_df : DataFrame,
+                                sample_df : DataFrame,
+                                chrono_df : DataFrame,
+                                d18O_df   : DataFrame,
+                                col_entity: list,
+                                col_site  : list,
+                                col_sample: list,
+                                col_chrono: list,
+                                col_d18O  : list)-> DataFrame :
+    ''' This function merges the SISAL dataframes site_df, entity_df, sample_df, chrono_df and d18O_df into a single DataFrame, 
+    keeping only the columns specified in lists col_entity, col_site, etc, from each dataframe.
+    /!/ Columns serving as index (sample_id, entity_id, etc) that are used to link the different dataframes (herited from sql tables) 
+    are automatically conserved and should not be specified in the lists. 
+    Inputs : 
+        - site_df   : DataFrame of the sisal database containing sites info
+        - entity_df : DataFrame of the sisal database containing entities info
+        - sample_df : DataFrame of the sisal database containing samples info
+        - chrono_df : DataFrame of the sisal database containing chronology info. Can be the df of sisal_chronology or original_chronology.
+        - d18O_df   : DataFrame of the sisal database containing d18O info.
+    Outputs :
+        - merged_df : DataFrame containing the columns specified in list arguments and the columns of indices 'sample_id','entity_id' and 'site_id'.
+    '''
+
+    entities1 = entity_df[ col_entity+['site_id','entity_id']].merge(site_df[ col_site+['site_id'] ],on='site_id',how='left')
+    sample1 = sample_df[ col_sample+['entity_id','sample_id'] ].merge(entities1, on='entity_id',how='left')
+    sample2 = sample1.merge(chrono_df[ col_chrono+['sample_id'] ], on='sample_id',how='left')
+    merged_df = sample2.merge(d18O_df[ col_d18O+['sample_id'] ], on='sample_id', how='left')
+
+    return merged_df
