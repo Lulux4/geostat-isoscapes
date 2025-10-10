@@ -134,3 +134,44 @@ def merge_sisal_df_with_columns(site_df   : DataFrame,
     merged_df = sample2.merge(d18O_df[ col_d18O+['sample_id'] ], on='sample_id', how='left')
 
     return merged_df
+
+def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
+    # Load SISAL data
+    print('loading database')
+    sisal_dict = load_sisal()
+
+    # Clean the data
+    print('cleaning samples')
+    if chrono == 'interp_age':
+        chronology_df_ref = 'original_chronology'
+    else : 
+        chronology_df_ref = 'sisal_chronology'
+    clean_dict = clean_sisal_data(sisal_dict,chrono=chrono)
+    site_df_clean = clean_dict['site']
+    entity_df_clean = clean_dict['entity']
+    d18O_df_clean = clean_dict['d18O']
+    sample_df_clean = clean_dict['sample']
+    chrono_df_clean = clean_dict[chronology_df_ref]
+
+    # Merge in one df
+    print('merging dataframes')
+    col_site = ['site_name','longitude','latitude']
+    col_entity = []
+    col_chrono = [chrono]
+    col_sample = ['mineralogy']
+    col_d18O = ['d18O_measurement','d18O_precision']
+
+    merged_data = merge_sisal_df_with_columns(
+        site_df= site_df_clean,
+        entity_df  = entity_df_clean,
+        sample_df  = sample_df_clean,
+        chrono_df  = chrono_df_clean,
+        d18O_df    = d18O_df_clean,
+        col_entity = col_entity,
+        col_chrono = col_chrono,
+        col_d18O   = col_d18O,
+        col_site   = col_site,
+        col_sample = col_sample
+        )
+    print('returning merged dataframe')
+    return merged_data
