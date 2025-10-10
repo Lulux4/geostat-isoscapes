@@ -1,6 +1,8 @@
 import pandas as pd
 from pandas import DataFrame
 import os 
+import plotly.graph_objects as go
+from plotly.graph_objects import Figure
 
 def load_sisal():
     ''' This function reads the SISAL database and return the data of chronology, dating, 
@@ -136,6 +138,10 @@ def merge_sisal_df_with_columns(site_df   : DataFrame,
     return merged_df
 
 def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
+    ''' Loads the SISAL database, apply basic cleaning (see documentation of function clean_sisal_data above),
+    and merges the different tables of the database into one dataframe 
+    (keeping only the commonly needed columns TODO:add flexibilizy in columns choice)
+    '''
     # Load SISAL data
     print('loading database')
     sisal_dict = load_sisal()
@@ -175,3 +181,75 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
         )
     print('returning merged dataframe')
     return merged_data
+
+def plot_global_map(data:DataFrame,
+                    title:str,
+                    quantity_col:str='d18O_measurement',
+                    quantity:str='d18O',
+                    unit:str='‰ VPDB',
+                    proj:bool=True)-> Figure:
+    ''' 3D or flat earth (natural earth proj)
+    If proj=True : 2D 
+    else : 3D
+    '''
+    fig = go.Figure()
+    fig.add_trace(go.Scattergeo(
+        lon=data["longitude"],
+        lat=data["latitude"],
+        text=data[quantity_col],
+        mode="markers",
+        marker=dict(
+            symbol="triangle-up",
+            size=10,
+            color=data[quantity_col],
+            colorscale="icefire",   # modern colormap
+            # cmin=-15.5,
+            # cmax=0,
+            opacity=0.7,
+            line=dict(color="white", width=1),
+            colorbar=dict(
+                title=f"{quantity}({unit})",
+                ticks="outside",
+                ticklen=6,
+                thickness=15
+            )
+        )
+    ))
+    if proj :
+        fig.update_layout(
+            geo=dict(
+                projection=dict(type="natural earth"),
+                showland=True,
+                landcolor="#f0f0f0",
+                showocean=True,
+                oceancolor="#dff4fd",
+                showcountries=False,
+                showcoastlines=True,
+                showframe=False
+            )
+        )
+    else :
+        fig.update_layout(
+            geo=dict(
+                projection=dict(type="orthographic", rotation=dict(lat=12, lon=0)),
+                showland=True,
+                landcolor="#f0f0f0",
+                showocean=True,
+                oceancolor="#def4fd",
+                showcountries=False,
+                showcoastlines=False,
+                showframe=False
+            )
+        )
+        # fig.write_html("../output/mean_values_d18O_interactive_map_sisal.html", include_plotlyjs="cdn")
+    fig.update_layout(
+        title=dict(
+                text=title,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=20, family="Arial, sans-serif")
+            ),
+            margin=dict(r=20, l=20, t=50, b=20),
+            template="plotly_white"
+    )
+    return fig
