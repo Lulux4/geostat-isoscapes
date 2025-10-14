@@ -4,6 +4,73 @@ import os
 import plotly.graph_objects as go
 from plotly.graph_objects import Figure
 
+# list of chinese sites - global const
+SITES_CHINA = [
+    "Kesang cave",
+    "Yangkou cave",
+    "Hulu cave",
+    "Huangye cave",
+    "Dayu cave",
+    "Dongge cave",
+    "Kulishu cave",
+    "Suozi cave",
+    "Xinglong cave",
+    "Furong cave",
+    "Xinya cave",
+    "Heshang cave",
+    "Xiaobailong cave",
+    "Sanbao cave",
+    "Tianmen",
+    "Jiuxian cave",
+    "Zhuliuping cave",
+    "Yaoba Don cave",
+    "Qingtian cave",
+    "Yamen cave",
+    "Lianhua cave, Hunan",
+    "Xiangshui cave",
+    "Dark cave",
+    "E'mei cave",
+    "Nuanhe cave",
+    "Shennong cave",
+    "Wanxiang cave",
+    "Xianglong cave",
+    "Baluk cave",
+    "Haozhu cave",
+    "Lianhua cave, Shanxi",
+    "Shenqi cave",
+    "Shigao cave",
+    "Wuya cave",
+    "Zhenzhu cave",
+    "Heifeng cave",
+    "Huangchao cave",
+    "Jiangjun cave",
+    "Jinfo cave",
+    "Jiulong cave",
+    "Linzhu cave",
+    "Qujia cave",
+    "Xinglong cave",
+    "Shijiangjun cave",
+    "Shizi cave",
+    "Wulu cave",
+    "Xiniu cave",
+    "Yangzi cave",
+    "Zhangjia cave"
+]
+
+SITES_CLOSE_TO_CHINA = [
+    "Baeg-nyong cave",
+    "Tham Doun Mai",
+    "Wah Shikhar cave",
+    "Mawmluh cave",
+    "Timta cave",
+    "Sahiya cave",
+    "Bittoo cave",
+    "Tityana cave",
+    "Kalakot cave",
+    "Talisman cave",
+    "Bir-Uja cave"
+]
+
 def load_sisal():
     ''' This function reads the SISAL database and return the data of chronology, dating, 
     samples, entities, sites in a dict of dfs. 
