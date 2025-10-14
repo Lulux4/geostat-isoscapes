@@ -3,8 +3,8 @@ from pandas import DataFrame
 import os 
 import plotly.graph_objects as go
 from plotly.graph_objects import Figure
-
-# list of chinese sites - global const
+from xarray import DataArray
+############################################################################################### CONSTANTS
 SITES_CHINA = [
     "Kesang cave",
     "Yangkou cave",
@@ -71,6 +71,7 @@ SITES_CLOSE_TO_CHINA = [
     "Bir-Uja cave"
 ]
 
+################################################################################## LOADING & PREPROCESSING
 def load_sisal():
     ''' This function reads the SISAL database and return the data of chronology, dating, 
     samples, entities, sites in a dict of dfs. 
@@ -114,6 +115,7 @@ def load_sisal():
             'entity_link_reference': entity_link_reference_df,
             'reference': reference_df }
 
+#### DATA PROCESSING
 def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
     ''' Cleaning the table "sample_df" of the SISAL database to keep only valid samples, based on these criterions :
     1.  remove samples corresponding to superseded entities
@@ -210,11 +212,11 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
     (keeping only the commonly needed columns TODO:add flexibilizy in columns choice)
     '''
     # Load SISAL data
-    print('loading database')
+    print('-> loading database')
     sisal_dict = load_sisal()
 
     # Clean the data
-    print('cleaning samples')
+    print(' > cleaning samples')
     if chrono == 'interp_age':
         chronology_df_ref = 'original_chronology'
     else : 
@@ -227,7 +229,6 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
     chrono_df_clean = clean_dict[chronology_df_ref]
 
     # Merge in one df
-    print('merging dataframes')
     col_site = ['site_name','longitude','latitude']
     col_entity = []
     col_chrono = [chrono]
@@ -246,9 +247,71 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
         col_site   = col_site,
         col_sample = col_sample
         )
-    print('returning merged dataframe')
+    print('loading and cleaning done.')
     return merged_data
 
+def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
+    ''' This functions converts calcite d18O (V-PDB standards) values to their drip water equivalent (V-SMOW standard), 
+    using the mineralogy and temperature associated to each sample to convert.
+    Input : 
+        - caclite_df : DataFrame including columns d18O_meansurement (float64),T (float64), mineralogy (str)
+    Outout :
+        - converted_df : copy of calcite_df with an extra column d180p_VSMOW containing the drip water d18O V-SMOW values.
+    '''
+    # from literature (Comas-Bru 2019)
+    conversion_cst = {'calcite'  :[16.1,24.6],
+                      'aragonite':[18.34,31.954]
+                      }
+    print('-> starting conversion')
+    converted_data = calcite_df.copy()
+    converted_data['d18Op_VSMOW'] = pd.NA
+
+    for mineralogy in ['calcite','aragonite']:
+        mask = converted_data['mineralogy']==mineralogy
+        d18O = converted_data.loc[mask,'d18O_measurement']
+        T = converted_data.loc[mask,'T']
+        c0,c1 = conversion_cst[mineralogy]
+        converted_data.loc[mask,'d18Op_VSMOW'] = 1.03092*d18O + 30.92 - ( c0*1000/T - c1 )
+    print('conversion done.')
+    return converted_data
+
+def retrieve_T_of_samples(data_df : DataFrame, chrono : str, temp_Xdf : DataArray) -> DataFrame:
+    ''' This function aims to retrieve the surface temperature associated to each sample of the dataframe in input, 
+    using a global temperature dataset provided in input as well. 
+    Inputs :
+        - chrono : str representing a chronology method (e.g. lin_interp_age...) 
+        - data_df : DataFrame of data, including columns 'longitude', 'latitude' and chrono
+        - temp_Xdf : Xarray dataset providing temperature on a global grid with 'lat' and 'lon' coordinates. 
+    Output : 
+        - dataT_df : DataFrame of the data with an extra column T representing the surface temperature.
+    '''
+    dataT = data_df.copy()
+    print('-> retrieving temperatures (takes a while...)')
+    # temp_Xdf.sel(lon=xr.DataArray(dataT['longitude'], dims="samples"),
+    #              lat=xr.DataArray(dataT['latitude'] , dims="samples"),
+    #              method='nearest',
+    #          ).values
+    # This one-liner produced OOM errors,
+    # so we prefer a longer but safer computation :
+    dataT['T'] = dataT.apply(lambda row : float(temp_Xdf.sel(lat = row['latitude'],
+                                                       lon = row['longitude'],
+                                                       time = -float(row[chrono]),
+                                                       method = 'nearest'
+                                                       )),axis=1)
+    # ######too long ###
+    # dataT['T'] = [
+    #     temp_Xdf.sel(
+    #         lat=lat,
+    #         lon=lon,
+    #         time=-float(age),
+    #         method='nearest'
+    #     ).values.item()
+    #     for lat, lon, age in zip(dataT['latitude'], dataT['longitude'], dataT[chrono])
+    # ]#################
+    print('temp retrieval done.')
+    return dataT
+
+################################################################################################# PLOTTING
 def plot_global_map(data:DataFrame,
                     title:str,
                     quantity_col:str='d18O_measurement',
