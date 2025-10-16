@@ -4,6 +4,9 @@ import os
 import plotly.graph_objects as go
 from plotly.graph_objects import Figure
 from xarray import DataArray
+from scipy.interpolate import RegularGridInterpolator
+import numpy as np
+
 ############################################################################################### CONSTANTS
 SITES_CHINA = [
     "Kesang cave",
@@ -104,7 +107,7 @@ def load_sisal():
         inplace = True)
 
     os.chdir(cwd)
-    
+
     return {'original_chronology' : original_chronology_df,
             'sample': sample_df,
             'entity': entity_df,
@@ -120,8 +123,9 @@ def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
     ''' Cleaning the table "sample_df" of the SISAL database to keep only valid samples, based on these criterions :
     1.  remove samples corresponding to superseded entities
     2.  remove samples with mixed mineralogy, keep only calcite or aragonite speleothems
-    3.  remove samples with no "chrono" age where "chrono" refers to the chronology to use. 
-    4.  remove samples for which we do not have a d18O measurement
+    3.  remove samples with no "chrono" age where "chrono" refers to the chronology to use
+    4.  remove samples with negative chronology (it is explicitel mentionned in SISAL read me that dates (yr BP) should be positive decimals)
+    5.  remove samples for which we do not have a d18O measurement
     Inputs :
         - sisal_dict : dict of the sisal database as returned by function load_sisal()
         - chrono : str referring to the chronology method of interest. 
@@ -152,13 +156,14 @@ def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
     unique_min_sample_df = sample_df1[sample_df1['entity_id'].isin(unique_entities[unique_entities == 1].index)]
     sample_df2 = unique_min_sample_df[unique_min_sample_df['mineralogy'].isin(['calcite', 'aragonite','secondary calcite'])]
     #############################
-    # 3) Keep only samples associated with a chronology age
-    chrono_df1 = chronology_df[( chronology_df['sample_id'].isin(sample_df2['sample_id']) ) 
-                               & ~( pd.isna(chronology_df[chrono]) )
+    # 3) Keep only samples associated with a (positive) chronology age
+    chrono_df1 = chronology_df[   (chronology_df['sample_id'].isin(sample_df2['sample_id']) ) 
+                               & ~( pd.isna(chronology_df[chrono]))
+                               &  (chronology_df[chrono]>=0)
                                ]
     sample_df3 = sample_df2[sample_df2['sample_id'].isin(chrono_df1['sample_id'])]
     #############################
-    # 4) Keep only samples existing in d18O_df and having a non nan measurement
+    # 5) Keep only samples existing in d18O_df and having a non nan measurement
     d18O_df1 = d18O_df.dropna(subset='d18O_measurement')
     sample_df4 = sample_df3[(sample_df3['sample_id'].isin(d18O_df1['sample_id']))]
 
@@ -216,7 +221,7 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
     sisal_dict = load_sisal()
 
     # Clean the data
-    print(' > cleaning samples')
+    print('   cleaning samples')
     if chrono == 'interp_age':
         chronology_df_ref = 'original_chronology'
     else : 
@@ -262,7 +267,6 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
     conversion_cst = {'calcite'  :[16.1,24.6],
                       'aragonite':[18.34,31.954]
                       }
-    print('-> starting conversion')
     converted_data = calcite_df.copy()
     converted_data['d18Op_VSMOW'] = pd.NA
 
@@ -272,44 +276,113 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
         T = converted_data.loc[mask,'T']
         c0,c1 = conversion_cst[mineralogy]
         converted_data.loc[mask,'d18Op_VSMOW'] = 1.03092*d18O + 30.92 - ( c0*1000/T - c1 )
-    print('conversion done.')
     return converted_data
 
-def retrieve_T_of_samples(data_df : DataFrame, chrono : str, temp_Xdf : DataArray) -> DataFrame:
-    ''' This function aims to retrieve the surface temperature associated to each sample of the dataframe in input, 
-    using a global temperature dataset provided in input as well. 
+def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chrono : str , method : str = 'linear') -> DataFrame :
+    ''' Retrieve the temperature of each sample of data_df by interpolating temp_xda values at data_df points using scipy RegularGridInterpolator
     Inputs :
-        - chrono : str representing a chronology method (e.g. lin_interp_age...) 
-        - data_df : DataFrame of data, including columns 'longitude', 'latitude' and chrono
-        - temp_Xdf : Xarray dataset providing temperature on a global grid with 'lat' and 'lon' coordinates. 
+        - data_df : DataFrame containing columns 'latitude', ' longitude', chrono. The chrono column should contain **positive** ages in yrs BP
+        - temp_xda : DataArray containing a global temperature dataset with dimensions 'lat','lon','time'. 
+                     Time is a **negative** age in yrs BP (i.e. -1000 stands for 1000 yrs BP).
+        - chrono : str of the name of the chronology column in data_df. 
+        - method : str of the name of the method to use to interpolate the temperature data points. Supported : "linear", "nearest", "slinear", "cubic", "quintic" and "pchip".
     Output : 
-        - dataT_df : DataFrame of the data with an extra column T representing the surface temperature.
+        - data_df : with an exra column 'T_interp' containing the temperature associated to each sample row.
     '''
-    dataT = data_df.copy()
-    print('-> retrieving temperatures (takes a while...)')
-    # temp_Xdf.sel(lon=xr.DataArray(dataT['longitude'], dims="samples"),
-    #              lat=xr.DataArray(dataT['latitude'] , dims="samples"),
-    #              method='nearest',
-    #          ).values
-    # This one-liner produced OOM errors,
-    # so we prefer a longer but safer computation :
-    dataT['T'] = dataT.apply(lambda row : float(temp_Xdf.sel(lat = row['latitude'],
-                                                       lon = row['longitude'],
-                                                       time = -float(row[chrono]),
-                                                       method = 'nearest'
-                                                       )),axis=1)
-    # ######too long ###
-    # dataT['T'] = [
-    #     temp_Xdf.sel(
-    #         lat=lat,
-    #         lon=lon,
-    #         time=-float(age),
-    #         method='nearest'
-    #     ).values.item()
-    #     for lat, lon, age in zip(dataT['latitude'], dataT['longitude'], dataT[chrono])
-    # ]#################
-    print('temp retrieval done.')
-    return dataT
+    # set up the interpolator
+    temp_lats  = temp_xda['lat'].values.copy()
+    temp_lon   = temp_xda['lon'].values.copy()
+    temp_times = temp_xda['time'].values.copy()
+    temp_values = temp_xda.values
+
+    interp_func = RegularGridInterpolator(
+        points = (temp_times, temp_lats, temp_lon),
+        values = temp_values,
+        bounds_error = False,
+        fill_value = np.nan,
+        method = method
+    )
+
+    # set up sample points for interpolation
+    sample_times = - data_df[chrono].values
+    sample_lats = data_df['latitude'].values
+    sample_lons = data_df['longitude'].values
+
+    points = np.column_stack([sample_times, sample_lats, sample_lons])
+
+    # interpolate
+    data_df[f'T_{method}'] = interp_func(points)
+    
+    return data_df
+
+# Deprecated : slower than RegularGridInterpolator, same results.
+# def retrieve_T_nearest_neighbour(data_df : DataFrame, chrono : str, temp_xda : DataArray) -> DataFrame:
+#     ''' This function aims to retrieve the surface temperature associated to each sample of the dataframe in input, 
+#     using the global temperature dataset provided in input, by attributing the temperature value at the nearest point
+#     (lon,lat,time) in this temperature dataset. 
+#     Inputs :
+#         - chrono : str representing a chronology method (e.g. lin_interp_age...) 
+#         - data_df : DataFrame of data, including columns 'longitude', 'latitude' and chrono
+#         - temp_xda : Xarray dataset providing temperature on a global grid with 'lat' and 'lon' coordinates. 
+#     Output : 
+#         - data_df : DataFrame of the data with an extra column T representing the surface temperature.
+#     '''
+#     print('-> retrieving temperatures using NN (takes a while...)')
+#     # temp_xda.sel(lon=xr.DataArray(dataT['longitude'], dims="samples"),
+#     #              lat=xr.DataArray(dataT['latitude'] , dims="samples"),
+#     #              method='nearest',
+#     #          ).values
+#     # This one-liner produced OOM errors,
+#     # and this method below was the slowest :
+#     # dataT['T'] = [
+#     #     temp_xda.sel(
+#     #         lat=lat,
+#     #         lon=lon,
+#     #         time=-float(age),
+#     #         method='nearest'
+#     #     ).values.item()
+#     #     for lat, lon, age in zip(dataT['latitude'], dataT['longitude'], dataT[chrono])
+#     # ]
+#     # so we prefer to apply this computation :
+#     data_df['T'] = data_df.apply(lambda row : float(temp_xda.sel(lat = row['latitude'],
+#                                                        lon = row['longitude'],
+#                                                        time = -float(row[chrono]),
+#                                                        method = 'nearest'
+#                                                        )),axis=1)
+#     print('temp NN retrieval done.')
+#     return data_df
+
+def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, chrono : str, temp_xda : DataArray, method : str = 'linear')-> DataFrame :
+    ''' 1) retrieves temperature of data_df samples based on the temp_xda datarray provided (interpolation with specified method + NN as backup) 
+        2) convert speleothem PDB d18O into precipitation VSMOW d18O using Tremaine equation.
+    Inputs :  TODO
+    Outputs : TODO
+    '''
+    print("-> converting speleothem data")
+    # 1. Temperature retrieval 
+    data_to_convert = retrieve_T_RegularGridInterp(data_df = data_df,temp_xda = temp_xda, chrono = chrono, method = 'linear')
+    #    Mask locs and times for which this method failed
+    mask_nan = data_to_convert['T_linear'].isna()
+    #    Apply the NN method for these points, if any
+    if mask_nan.sum() :
+        print(f'   {method} interpolation failed for {mask_nan.sum()} samples, trying to fill missing T with nearest neighbour method')
+        data_to_convert['T_nearest'] = pd.NA
+        data_to_convert.loc[mask_nan,'T_nearest'] = retrieve_T_RegularGridInterp(data_df=data_df[mask_nan].copy(),
+                                                                                 temp_xda=temp_xda,
+                                                                                 chrono=chrono,
+                                                                                 method='nearest')['T_nearest']
+    #    Gather T in a T column
+    data_to_convert.loc[ mask_nan,'T'] = data_to_convert.loc[mask_nan,'T_nearest']
+    data_to_convert.loc[~mask_nan,'T'] = data_to_convert.loc[~mask_nan,'T_linear']
+    mask_nans_final = data_to_convert['T'].isna()
+    print(f'   after {method} interpolation and nearest neighbour backup, still no temperature for', mask_nans_final.sum(),'samples.')
+    print("   temperature retrieval finished, starting conversion")
+    
+    # 2. Conversion 
+    converted_data = convert_calcite_to_drip_water(data_to_convert)
+    print("conversion done.")
+
+    return converted_data
 
 ################################################################################################# PLOTTING
 def plot_global_map(data:DataFrame,
