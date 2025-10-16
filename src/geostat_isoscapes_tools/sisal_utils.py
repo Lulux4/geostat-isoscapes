@@ -147,31 +147,31 @@ def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
     #############################
     # 1) Remove superseded entities and their samples
     entity_df1 = entity_df.loc[entity_df['entity_status']!='superseded']
-    sample_df1 = sample_df[sample_df['entity_id'].isin(entity_df1['entity_id'].unique())]
+    sample_df1 = sample_df[sample_df["entity_id"].isin(entity_df1["entity_id"].unique())]
     #############################
     # 2) Exclude samples of mixed mineralogy entities :
     #   Find how many different mineralogies exist in the samples of each entity :
-    unique_entities = sample_df1.groupby('entity_id')['mineralogy'].nunique() # dropna=False to count nan as a different value                                                                 
+    unique_entities = sample_df1.groupby("entity_id")["mineralogy"].nunique() # dropna=False to count nan as a different value                                                                 
     #   Keep only those with a single mineralogy
-    unique_min_sample_df = sample_df1[sample_df1['entity_id'].isin(unique_entities[unique_entities == 1].index)]
-    sample_df2 = unique_min_sample_df[unique_min_sample_df['mineralogy'].isin(['calcite', 'aragonite','secondary calcite'])]
+    unique_min_sample_df = sample_df1[sample_df1["entity_id"].isin(unique_entities[unique_entities == 1].index)]
+    sample_df2 = unique_min_sample_df[unique_min_sample_df["mineralogy"].isin(['calcite', 'aragonite'])]
     #############################
     # 3) Keep only samples associated with a (positive) chronology age
-    chrono_df1 = chronology_df[   (chronology_df['sample_id'].isin(sample_df2['sample_id']) ) 
+    chrono_df1 = chronology_df[   (chronology_df["sample_id"].isin(sample_df2["sample_id"]) ) 
                                & ~( pd.isna(chronology_df[chrono]))
                                &  (chronology_df[chrono]>=0)
                                ]
-    sample_df3 = sample_df2[sample_df2['sample_id'].isin(chrono_df1['sample_id'])]
+    sample_df3 = sample_df2[sample_df2["sample_id"].isin(chrono_df1["sample_id"])]
     #############################
     # 5) Keep only samples existing in d18O_df and having a non nan measurement
     d18O_df1 = d18O_df.dropna(subset='d18O_measurement')
-    sample_df4 = sample_df3[(sample_df3['sample_id'].isin(d18O_df1['sample_id']))]
+    sample_df4 = sample_df3[(sample_df3["sample_id"].isin(d18O_df1["sample_id"]))]
 
 
-    final_entity_df = entity_df[entity_df['entity_id'].isin(sample_df4['entity_id'])]
-    final_chrono_df = chronology_df[chronology_df['sample_id'].isin(sample_df4['sample_id'])]
-    final_d18O_df = d18O_df[d18O_df['sample_id'].isin(sample_df4['sample_id'])]
-    final_site_df = site_df[site_df['site_id'].isin(final_entity_df['site_id'])]
+    final_entity_df = entity_df[entity_df["entity_id"].isin(sample_df4["entity_id"])]
+    final_chrono_df = chronology_df[chronology_df["sample_id"].isin(sample_df4["sample_id"])]
+    final_d18O_df = d18O_df[d18O_df["sample_id"].isin(sample_df4["sample_id"])]
+    final_site_df = site_df[site_df["site_id"].isin(final_entity_df["site_id"])]
     
     return {ckey : final_chrono_df,
             'sample': sample_df4,
@@ -201,13 +201,13 @@ def merge_sisal_df_with_columns(site_df   : DataFrame,
         - chrono_df : DataFrame of the sisal database containing chronology info. Can be the df of sisal_chronology or original_chronology.
         - d18O_df   : DataFrame of the sisal database containing d18O info.
     Outputs :
-        - merged_df : DataFrame containing the columns specified in list arguments and the columns of indices 'sample_id','entity_id' and 'site_id'.
+        - merged_df : DataFrame containing the columns specified in list arguments and the columns of indices "sample_id","entity_id" and "site_id".
     '''
 
-    entities1 = entity_df[ col_entity+['site_id','entity_id']].merge(site_df[ col_site+['site_id'] ],on='site_id',how='left')
-    sample1 = sample_df[ col_sample+['entity_id','sample_id'] ].merge(entities1, on='entity_id',how='left')
-    sample2 = sample1.merge(chrono_df[ col_chrono+['sample_id'] ], on='sample_id',how='left')
-    merged_df = sample2.merge(d18O_df[ col_d18O+['sample_id'] ], on='sample_id', how='left')
+    entities1 = entity_df[ col_entity+["site_id","entity_id"]].merge(site_df[ col_site+["site_id"] ],on="site_id",how='left')
+    sample1 = sample_df[ col_sample+["entity_id","sample_id"] ].merge(entities1, on="entity_id",how='left')
+    sample2 = sample1.merge(chrono_df[ col_chrono+["sample_id"] ], on="sample_id",how='left')
+    merged_df = sample2.merge(d18O_df[ col_d18O+["sample_id"] ], on="sample_id", how='left')
 
     return merged_df
 
@@ -237,7 +237,7 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
     col_site = ['site_name','longitude','latitude']
     col_entity = []
     col_chrono = [chrono]
-    col_sample = ['mineralogy']
+    col_sample = ["mineralogy"]
     col_d18O = ['d18O_measurement','d18O_precision']
 
     merged_data = merge_sisal_df_with_columns(
@@ -271,11 +271,12 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
     converted_data['d18Op_VSMOW'] = pd.NA
 
     for mineralogy in ['calcite','aragonite']:
-        mask = converted_data['mineralogy']==mineralogy
+        mask = converted_data["mineralogy"]==mineralogy
         d18O = converted_data.loc[mask,'d18O_measurement']
         T = converted_data.loc[mask,'T']
         c0,c1 = conversion_cst[mineralogy]
         converted_data.loc[mask,'d18Op_VSMOW'] = 1.03092*d18O + 30.92 - ( c0*1000/T - c1 )
+        print(f"for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
 def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chrono : str , method : str = 'linear') -> DataFrame :
