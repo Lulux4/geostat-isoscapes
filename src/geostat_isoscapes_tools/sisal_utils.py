@@ -156,7 +156,10 @@ def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
     unique_min_sample_df = sample_df1[sample_df1["entity_id"].isin(unique_entities[unique_entities == 1].index)]
     sample_df2 = unique_min_sample_df[unique_min_sample_df["mineralogy"].isin(['calcite', 'aragonite'])]
     #############################
-    # 3) Keep only samples associated with a (positive) chronology age
+    # 3) Keep only samples associated with a ( 4. positive) chronology age
+    # print(chronology_df.loc[(chronology_df["sample_id"].isin(sample_df2["sample_id"]) ) 
+    #                            & ~( pd.isna(chronology_df[chrono])) &  (chronology_df[chrono]<=-75),
+    #                            chrono])
     chrono_df1 = chronology_df[   (chronology_df["sample_id"].isin(sample_df2["sample_id"]) ) 
                                & ~( pd.isna(chronology_df[chrono]))
                                &  (chronology_df[chrono]>=0)
