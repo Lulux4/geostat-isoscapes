@@ -308,11 +308,11 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chr
     )
 
     # set up sample points for interpolation
-    sample_times = - data_df[chrono].values
+    sample_times = - data_df[chrono].values # type: ignore
     sample_lats = data_df['latitude'].values
     sample_lons = data_df['longitude'].values
 
-    points = np.column_stack([sample_times, sample_lats, sample_lons])
+    points = np.column_stack([sample_times, sample_lats, sample_lons]) # type: ignore
 
     # interpolate
     data_df[f'T_{method}'] = interp_func(points)
