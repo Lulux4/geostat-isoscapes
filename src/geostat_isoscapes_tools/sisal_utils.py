@@ -388,6 +388,28 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, chrono
 
     return converted_data
 
+def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame) -> pd.DataFrame :
+    ''' TODO : explain this rough def of continents
+    '''
+    df = df_orig.copy()
+    # Define regions
+    df['continent'] = ''
+    #middle east apart form africa :
+    df.loc[(df['latitude']>= -35)&(df['latitude']<= 37)&(df['longitude']>= -20)&(df['longitude']<= 52),'continent']='Africa'
+    df.loc[(df['latitude']<= -60),'continent']='Antarctica'
+    df.loc[(df['latitude']>= 5)&(df['latitude']<= 81)&(df['longitude']>= 26)&(df['longitude']<= 180),'continent']='Asia'
+    df.loc[(df['latitude']>= 35)&(df['latitude']<= 72)&(df['longitude']>= -25)&(df['longitude']<= 50),'continent']='Europe'
+    df.loc[(df['latitude']>= 5)&(df['latitude']<= 83)&((df['longitude']>= -170)&(df['longitude']<= -50)),'continent']='North America'
+    df.loc[(df['latitude']>= -50)&(df['latitude']<= 0)&((df['longitude']>= 110)|(df['longitude']<= 180)),'continent']='Oceania'
+    df.loc[(df['latitude']>= -60)&(df['latitude']<= 15)&(df['longitude']>= -90)&(df['longitude']<= -30),'continent']='South America'
+    df.loc[(df['continent']=='') & (df['latitude']>= 0) & (df['latitude']<= 15) & (df['longitude']>= 110) & (df['longitude']<= 120),'continent']='Indonesia' # Indonesie, transcontinental
+    df.loc[(df['continent']=='') & (df['latitude']>= 75) & (df['latitude']<= 85) & (df['longitude']>= -30) & (df['longitude']<= -15),'continent']='North America' # Greenland is on North America plate
+    df.loc[(df['latitude']>= 12)&(df['latitude']<= 42)&(df['longitude']>= 32)&(df['longitude']<= 60),'continent']='Middle East' # Middle East
+
+    continents = df['continent'].unique()
+    print('Continents found in the site df :',continents)
+    return df
+
 ################################################################################################# PLOTTING
 def plot_global_map(data:DataFrame,
                     title:str,
