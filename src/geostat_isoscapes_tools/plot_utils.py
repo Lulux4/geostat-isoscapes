@@ -1,10 +1,16 @@
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import matplotlib.pyplot as plt 
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 import xarray as xr
+import numpy as np
 
-def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray, time: str, title :str = 'Values of d18Op')-> tuple[Figure,Axes]:
+def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
+                                     time: str, 
+                                     title :str = 'Values of d18Op', 
+                                     countries_borders : bool =False
+                                     )-> tuple[Figure,Axes]:
     ''' Plot the given isotope data array slice in platecarree projection.
     '''
     fig, ax = plt.subplots(figsize=(15, 8), subplot_kw={"projection": ccrs.PlateCarree()})
@@ -16,8 +22,23 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray, time: str, t
         cbar_kwargs={"label": dataarray_slice.name},
         robust=True
     ) #type: ignore
+    
+    if countries_borders :
+        country_borders = cfeature.NaturalEarthFeature(
+        category='cultural',
+        name='admin_0_boundary_lines_land',
+        scale='50m',
+        facecolor='none')
+        ax.add_feature(country_borders, edgecolor='gray') #type:ignore
 
     ax.coastlines() # type: ignore
+    valid = dataarray_slice.where(~np.isnan(dataarray_slice), drop=True)
+    ax.set_extent([
+        float(valid.lon.min()),
+        float(valid.lon.max()),
+        float(valid.lat.min()),
+        float(valid.lat.max())
+    ], crs=ccrs.PlateCarree())
     # title with the year and the month
     ax.set_title(f"{title} - {time}")
     return fig, ax

@@ -7,7 +7,11 @@ from xarray import DataArray
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np
 
-############################################################################################### CONSTANTS
+# =============================================================
+# Useful functions and constants for handling SISAL data 
+# =============================================================
+
+########################################################################################## CONSTANTS
 SITES_CHINA = [
     "Kesang cave",
     "Yangkou cave",
@@ -410,7 +414,7 @@ def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame) -> pd.DataFrame :
     print('Continents found in the site df :',continents)
     return df
 
-################################################################################################# PLOTTING
+########################################################################################### PLOTTING
 def plot_global_map(data:DataFrame,
                     title:str,
                     quantity_col:str='d18O_measurement',

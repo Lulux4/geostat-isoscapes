@@ -1,12 +1,10 @@
 import xarray as xr
-from xarray import DataArray
 import pandas as pd
 
-def load_xarray_datarray(fn: str, qty : str) -> DataArray:
-    """ Just a function to open a netcdf data array """
+def load_xarray_datarray(fn: str) -> xr.Dataset:
+    """ Just a function to open a netcdf dataset """
     with xr.open_dataset(filename_or_obj=fn, engine='netcdf4',decode_times=False) as file:
-        dataArray = file[qty]
-    return dataArray
+        return file
 
 def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     ''' This function bins a pandas Series according to the given bin width.
