@@ -7,10 +7,11 @@ from sklearn.linear_model import LinearRegression
 from pyproj import Geod
 import gstools as gs
 import skgstat as skg
+from scipy.optimize import curve_fit
 
-# =====================================================
-# Useful functions for geostatistical tasks 
-# =====================================================
+# ==========================================================
+# Coordinates projections 
+# ==========================================================
 
 def get_projected_coords_and_vals(data_array : xr.DataArray, time : str | float, epsg : str = "EPSG:3857"):    
     ''' This function extracts a slice from a xarray DataArray at a given time,
@@ -34,7 +35,9 @@ def project_coords(lons,lats,epsg="EPSG:3857"):
     xs, ys = transformer.transform(lons, lats)
     return xs, ys 
 
-
+# =========================================================
+# Useful functions for variogram computation using libraries
+# =========================================================
 
 def detrend_data(coords, vals):
     ''' detrend: fit plane z ~ x + y via a linear regression and subtract it to vals.
@@ -140,6 +143,8 @@ def variogram_with_gstat(df,
         return V.bins, V.experimental, V.bin_count,V.fitted_model
     
 def make_fixed_bin_func(centers):
+    ''' returns a function with returning the (given) centers and associated edges, no matter the args provided.
+    '''
     def fixed(*args, **kwargs):
         edges = np.concatenate(([centers[0] - (centers[1]-centers[0])/2],
                         (centers[:-1] + centers[1:])/2,
@@ -147,3 +152,107 @@ def make_fixed_bin_func(centers):
         # print('edge shape :',edges.shape, ' centers shape :',centers.shape)
         return centers, edges
     return fixed
+
+# =========================================================================
+# variogram **models** and fit function 
+# =========================================================================
+def spherical_model(h, sill, range_, nugget=0):
+    """Spherical model for variograms 
+    """
+    h = np.array(h)
+    gamma = np.where(
+        h <= range_,
+        nugget + sill * (1.5 * (h / range_) - 0.5 * (h / range_) ** 3),
+        nugget + sill
+    )
+    return gamma
+
+def exponential_model(h, sill, range_, nugget=0):
+    """ Exponential model for variograms
+    """
+    h = np.array(h)
+    return nugget + sill * (1 - np.exp(-h / range_))
+
+def gaussian_model(h, sill, range_, nugget=0):
+    """Gaussian variogram model
+    """
+    h = np.array(h)
+    return nugget + sill * (1 - np.exp(-(h ** 2) / (range_ ** 2)))
+
+def composite_model(h, *params):
+    """
+    Composite model supporting up to two components.
+    Example parameter order:
+      sill1, range1, sill2, range2, nugget
+    """
+    sill1, range1, sill2, range2, nugget = params
+    return (spherical_model(h, sill1, range1, nugget=0) + gaussian_model(h, sill2, range2, nugget=0) + nugget )
+
+def fit_variogram_model(bins, gammas, model='spherical', initial_params=None, bounds=None, pair_counts=None,):
+    """
+    Fit a theoretical variogram model to empirical data (distances=bins and semivariances=gammas).
+
+    Inputs :
+        - bins : array
+            Lag distances
+        - gammas : array
+            Semivariances
+        - model : str
+            'spherical', 'exponential', 'gaussian', or 'composite'
+        - initial_params : list or None
+            Starting guess for parameters
+        - bounds : 2-tuple or None
+            Lower and upper bounds for curve_fit
+        - pair_counts : array or None.
+            number of pairs in each bin, used for weighting the fit (not mandatory)
+
+    Outputs : 
+        - params : dict
+            Optimal parameters
+        - fitted_fct : callable
+            The fitted model function
+        - pcov : ndarray
+            Covariance matrix of the fit
+    """
+
+    model_dict = {
+        'spherical': (spherical_model, ['sill', 'range', 'nugget']),
+        'exponential': (exponential_model, ['sill', 'range', 'nugget']),
+        'gaussian': (gaussian_model, ['sill', 'range', 'nugget']),
+        'composite': (composite_model, ['sill1', 'range1', 'sill2', 'range2', 'nugget'])
+    }
+
+    if model not in model_dict:
+        raise ValueError(f"Unknown model '{model}'. Choose from {list(model_dict.keys())}.")
+
+    func, param_names = model_dict[model]
+
+    if initial_params is None:
+        sill_guess = np.nanmax(gammas)
+        range_guess = np.nanmax(bins) / 3
+        nugget_guess = gammas[0]
+        if model == 'composite':
+            initial_params = [sill_guess/2, range_guess, sill_guess/2, range_guess*2, nugget_guess]
+        else:
+            initial_params = [sill_guess, range_guess, nugget_guess]
+
+    if pair_counts is not None:
+        pair_counts = np.asarray(pair_counts)
+        # Weights proportional to sqrt(N) => sigma = 1 / sqrt(N) => curve_fit minimizes residual*sqrt(N)
+        sigma = 1.0 / np.sqrt(np.maximum(pair_counts, 1))
+    else:
+        sigma = None 
+
+    popt, pcov = curve_fit(func, bins, gammas, p0=initial_params, bounds=bounds or (-np.inf, np.inf), sigma=sigma, absolute_sigma=False)
+
+    fitted_fct = make_fitted_model_func(func,*popt)
+    params = {name: val for name, val in zip(param_names, popt)}
+    params['model_name'] = model
+    
+    return params,fitted_fct,pcov
+
+def make_fitted_model_func(f,*args,**kwargs):
+    ''' Make a function that takes only lags in arguments and has fixed parameters '''
+    def func(h):
+        return f(h,*args,*kwargs)
+    return func

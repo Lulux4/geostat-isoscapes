@@ -77,30 +77,31 @@ def plot_variogram_from_bins_and_gamma(centers,
             counts = counts[reliable]
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(centers/1000, gamma, 'o--', color='C0',linewidth=1,markersize=4)
-    ax.set_xlabel("Lag distance (km)")
+    ax.plot(centers, gamma, 'o--', color='C0',linewidth=1,markersize=4)
+    ax.set_xlabel("Lag distance (m)")
     ax.set_ylabel("Semivariance")
 
     # Overlay model if wanted and given
     if (plot_model) and (model_name is not None) and (model_fct is not None):
-        ax.plot(centers/1000,model_fct(centers),'-', color='C1', linewidth=1, label=f'{model_name} fit')
+        h = np.arange(0,centers.max(),10000)
+        ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{model_name} fit')
         plt.legend()
     
-    width = (centers[1]-centers[0])/1000
+    width = centers[1]-centers[0]
     # Overlay bins counts if given
     if counts is not None:
         # Overlay pair counts
         ax2 = ax.twinx()
-        ax2.bar(centers/1000, counts, width = width,
+        ax2.bar(centers, counts, width = width,
                 color='red', alpha=0.1, label='Pair counts')
         ax2.set_ylabel('Number of pairs', color='red')
         ax2.tick_params(axis='y', labelcolor='red')
         if std_counts is not None :
-            ax2.bar(centers/1000, std_counts, width = width,
+            ax2.bar(centers, std_counts, width = width,
                     color='blue', alpha=0.1, label='Pair counts std')
     
     plt.title(f"Empirical variogram — {time}")
-    plt.xlim(0, centers.max()/1000+width)
+    plt.xlim(0, centers.max()+width)
     plt.grid(True, alpha=0.4)
     plt.show()
 
