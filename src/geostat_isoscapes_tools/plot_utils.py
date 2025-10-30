@@ -13,7 +13,7 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      )-> tuple[Figure,Axes]:
     ''' Plot the given isotope data array slice in platecarree projection.
     '''
-    fig, ax = plt.subplots(figsize=(15, 8), subplot_kw={"projection": ccrs.PlateCarree()})
+    fig, ax = plt.subplots(figsize=(10, 5), subplot_kw={"projection": ccrs.PlateCarree()})
     
     dataarray_slice.plot(
         ax=ax,
@@ -33,12 +33,12 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
 
     ax.coastlines() # type: ignore
     valid = dataarray_slice.where(~np.isnan(dataarray_slice), drop=True)
-    ax.set_extent([
+    ax.set_extent([             # type: ignore
         float(valid.lon.min()),
         float(valid.lon.max()),
         float(valid.lat.min()),
         float(valid.lat.max())
-    ], crs=ccrs.PlateCarree())
+    ], crs=ccrs.PlateCarree()) 
     # title with the year and the month
     ax.set_title(f"{title} - {time}")
     return fig, ax
@@ -57,8 +57,9 @@ def plot_projected_data(coords_proj,vals_s, projection_str='Mercator'):
 
 def plot_variogram_from_bins_and_gamma(centers,
                                        gamma,
-                                       time, 
+                                       time : str, 
                                        counts = None, 
+                                       std_counts=None,
                                        min_pairs=30, 
                                        plot_model : bool = True, 
                                        model_name : str|None = None, 
@@ -94,6 +95,9 @@ def plot_variogram_from_bins_and_gamma(centers,
                 color='red', alpha=0.1, label='Pair counts')
         ax2.set_ylabel('Number of pairs', color='red')
         ax2.tick_params(axis='y', labelcolor='red')
+        if std_counts is not None :
+            ax2.bar(centers/1000, std_counts, width = width,
+                    color='blue', alpha=0.1, label='Pair counts std')
     
     plt.title(f"Empirical variogram — {time}")
     plt.xlim(0, centers.max()/1000+width)

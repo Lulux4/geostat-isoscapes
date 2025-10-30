@@ -12,7 +12,7 @@ import skgstat as skg
 # Useful functions for geostatistical tasks 
 # =====================================================
 
-def get_projected_coords_and_vals(data_array : xr.DataArray, time : str, epsg : str = "EPSG:3857"):    
+def get_projected_coords_and_vals(data_array : xr.DataArray, time : str | float, epsg : str = "EPSG:3857"):    
     ''' This function extracts a slice from a xarray DataArray at a given time,
     converts lat and lon coordinates to the chosen epsg projection, stack them to get an array of shape (n,2),
     and returns the stacked arrray as well as the flattened values associated to each point of the coordinates array.
@@ -94,6 +94,7 @@ def variogram_with_gstat(df,
                          trend_removal=False, 
                          nlags : int = 30, 
                          maxlag : float | str | None = 'median', 
+                         centers : np.ndarray | None = None,
                          model : str ='spherical',
                          return_Variogram_object=False,
                          seed = 42
@@ -114,16 +115,35 @@ def variogram_with_gstat(df,
         vals = detrend_data(XY,df[quantity].values)
 
     # Compute the variogram 
-    V = skg.Variogram(
-        df[['x','y']].values,
-        vals,
-        n_lags=nlags,
-        normalize=True,
-        maxlag=maxlag,
-        model=model,
-        use_nugget=True
-    )
+    if centers is None :
+        V = skg.Variogram(
+            df[['x','y']].values,
+            vals,
+            n_lags=nlags,
+            normalize=True,
+            maxlag=maxlag,
+            model=model,
+            use_nugget=True
+        )
+    else :
+        V = skg.Variogram(
+            df[['x','y']].values,
+            vals,
+            normalize=True,
+            bin_func = make_fixed_bin_func(centers), #type: ignore
+            model=model,
+            use_nugget=True
+        )
     if return_Variogram_object:
         return V
     else :
         return V.bins, V.experimental, V.bin_count,V.fitted_model
+    
+def make_fixed_bin_func(centers):
+    def fixed(*args, **kwargs):
+        edges = np.concatenate(([centers[0] - (centers[1]-centers[0])/2],
+                        (centers[:-1] + centers[1:])/2,
+                        [centers[-1] + (centers[-1]-centers[-2])/2]))
+        # print('edge shape :',edges.shape, ' centers shape :',centers.shape)
+        return centers, edges
+    return fixed

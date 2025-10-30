@@ -4,6 +4,7 @@ Bottleneck @ file:///croot/bottleneck_1731058641041/work
 branca @ file:///home/task_175793475266434/conda-bld/branca_1757934800346/work
 Brotli @ file:///croot/brotli-split_1736182456865/work
 brotlicffi @ file:///croot/brotlicffi_1736182461069/work
+cached-property @ file:///croot/cached-property_1754404471781/work
 Cartopy @ file:///croot/cartopy_1741279414207/work
 certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1759648874697/work/certifi
 cffi @ file:///home/task_176009809567301/conda-bld/cffi_1760098107768/work
@@ -14,13 +15,18 @@ contourpy @ file:///croot/contourpy_1732540045555/work
 cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
 debugpy @ file:///home/task_175706710642905/conda-bld/debugpy_1757067121571/work
 decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1740384970518/work
+emcee @ file:///home/conda/feedstock_root/build_artifacts/emcee_1734122663166/work
 exceptiongroup @ file:///home/conda/feedstock_root/build_artifacts/exceptiongroup_1746947292760/work
 executing @ file:///home/conda/feedstock_root/build_artifacts/executing_1756729339227/work
 fastjsonschema @ file:///croot/python-fastjsonschema_1731939362158/work
 folium @ file:///home/task_175874978220549/conda-bld/folium_1758749948057/work
 fonttools @ file:///home/task_175975424449102/conda-bld/fonttools_1759754872210/work
 geopandas @ file:///home/conda/feedstock_root/build_artifacts/geopandas_1759763141056/work
--e git+https://github.com/Lulux4/geostat-isoscapes.git@110fac3729c8030e9555ccffc9346e343d7207f1#egg=geostat_isoscapes_tools
+-e git+https://github.com/Lulux4/geostat-isoscapes.git@c0a755a48bf4b9c7342a6a68511b8c688f987d1e#egg=geostat_isoscapes_tools
+gstools @ file:///home/conda/feedstock_root/build_artifacts/gstools_1745930834845/work
+gstools_cython @ file:///home/conda/feedstock_root/build_artifacts/gstools-cython_1758632809801/work
+h5py @ file:///home/conda/feedstock_root/build_artifacts/h5py_1760616406426/work
+hankel @ file:///home/conda/feedstock_root/build_artifacts/hankel_1734940983813/work
 idna @ file:///croot/idna_1714398848350/work
 imageio @ file:///croot/imageio_1738159938990/work
 importlib_metadata @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_importlib-metadata_1747934053/work
@@ -39,10 +45,14 @@ kiwisolver @ file:///croot/kiwisolver_1737039087198/work
 llvmlite==0.45.1
 logistro @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_logistro_1752063775/work
 mapclassify @ file:///croot/mapclassify_1754553901415/work
+markdown-it-py @ file:///croot/markdown-it-py_1756299186942/work
 MarkupSafe @ file:///croot/markupsafe_1738584038848/work
 matplotlib==3.10.6
 matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1733416936468/work
+mdurl @ file:///home/task_175855215063312/conda-bld/mdurl_1758552166963/work
+meshio @ file:///home/conda/feedstock_root/build_artifacts/meshio_1706720595231/work
 mkl-service==2.4.0
+mpmath @ file:///croot/mpmath_1690848262763/work
 narwhals @ file:///home/task_176000268445683/conda-bld/narwhals_1760003491109/work
 nbformat @ file:///home/conda/feedstock_root/build_artifacts/nbformat_1733402752141/work
 nest_asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_1733325553580/work
@@ -66,6 +76,7 @@ psutil @ file:///home/task_175710403608886/conda-bld/psutil_1757104541537/work
 ptyprocess @ file:///home/conda/feedstock_root/build_artifacts/ptyprocess_1733302279685/work/dist/ptyprocess-0.7.0-py2.py3-none-any.whl#sha256=92c32ff62b5fd8cf325bec5ab90d7be3d2a8ca8c8a3813ff487a8d2002630d1f
 pure_eval @ file:///home/conda/feedstock_root/build_artifacts/pure_eval_1733569405015/work
 pycparser @ file:///home/task_175749606196006/conda-bld/pycparser_1757496076770/work
+pyevtk @ file:///home/conda/feedstock_root/build_artifacts/pyevtk_1734537867273/work
 Pygments @ file:///home/conda/feedstock_root/build_artifacts/pygments_1750615794071/work
 pyogrio @ file:///croot/pyogrio_1753452334159/work
 pyparsing @ file:///croot/pyparsing_1731445506121/work
@@ -80,6 +91,7 @@ pytz @ file:///croot/pytz_1752135852232/work
 pyzmq @ file:///home/task_175810349686595/conda-bld/pyzmq_1758103934047/work
 referencing @ file:///croot/referencing_1699012038513/work
 requests @ file:///croot/requests_1756709366904/work
+rich @ file:///home/task_176037557380661/conda-bld/rich_1760375627999/work
 rpds-py @ file:///croot/rpds-py_1736541261634/work
 scikit-gstat @ file:///home/conda/feedstock_root/build_artifacts/scikit-gstat_1747633672190/work
 scikit-learn @ file:///home/task_175861953185369/conda-bld/scikit-learn_1758619565626/work
