@@ -283,7 +283,7 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
         T = converted_data.loc[mask,'T']
         c0,c1 = conversion_cst[mineralogy]
         converted_data.loc[mask,'d18Op_VSMOW'] = 1.03092*d18O + 30.92 - ( c0*1000/T - c1 )
-        print(f"for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
+        print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
 def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chrono : str , method : str = 'linear') -> DataFrame :
@@ -411,7 +411,7 @@ def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame) -> pd.DataFrame :
     df.loc[(df['latitude']>= 12)&(df['latitude']<= 42)&(df['longitude']>= 32)&(df['longitude']<= 60),'continent']='Middle East' # Middle East
 
     continents = df['continent'].unique()
-    print('Continents found in the site df :',continents)
+    # print('-> Continents found in the site df :',continents)
     return df
 
 ########################################################################################### PLOTTING
@@ -453,12 +453,13 @@ def plot_global_map(data:DataFrame,
             geo=dict(
                 projection=dict(type="natural earth"),
                 showland=True,
-                landcolor="#f0f0f0",
+                landcolor="#fffafa",
                 showocean=True,
-                oceancolor="#dff4fd",
-                showcountries=False,
+                oceancolor="#83d0f1",
+                showcountries=True,
                 showcoastlines=True,
-                showframe=False
+                showframe=False,
+                fitbounds="locations"
             )
         )
     else :
@@ -469,7 +470,7 @@ def plot_global_map(data:DataFrame,
                 landcolor="#f0f0f0",
                 showocean=True,
                 oceancolor="#def4fd",
-                showcountries=False,
+                showcountries=True,
                 showcoastlines=False,
                 showframe=False
             )
