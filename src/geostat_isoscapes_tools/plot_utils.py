@@ -5,14 +5,15 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 import xarray as xr
 import numpy as np
+from . import geostat_utils as gutils
 
 def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
                                      title :str = 'Values of d18Op', 
                                      countries_borders : bool =False
                                      )-> tuple[Figure,Axes]:
-    ''' Plot the given isotope data array slice in platecarree projection.
-    '''
+    """ Plot the given isotope data array slice in platecarree projection.
+    """
     fig, ax = plt.subplots(figsize=(10, 5), subplot_kw={"projection": ccrs.PlateCarree()})
     
     dataarray_slice.plot(
@@ -64,28 +65,39 @@ def plot_variogram_from_bins_and_gamma(centers,
                                        plot_model : bool = True, 
                                        model_name : str|None = None, 
                                        model_fct = None,
-                                       figsize: tuple[int,int]=(10,5)
-                                       ) -> tuple[Figure,Axes]:
-    ''' Plot an empirical variogram from given bin centers and semivariances values.
+                                       model_params = None,
+                                       figsize: tuple[int,int]=(10,5),
+                                       ax_ = None,
+                                       save_name : str | None = None
+                                       ) -> tuple[Figure,Axes] | Axes :
+    """ Plot an empirical variogram from given bin centers and semivariances values.
     Overlays pairs number per bin if counts is given. Does not plot bins with less than min_pairs if counts is given.
-    '''
+    """
     if counts is not None :
         reliable = counts >= min_pairs
         centers = centers[reliable]
         gamma = gamma[reliable]
         if counts is not None:
             counts = counts[reliable]
-
-    fig, ax = plt.subplots(figsize=figsize)
+    if ax_ is None :
+        fig, ax = plt.subplots(figsize=figsize)
+    else :
+        ax = ax_
+    
     ax.plot(centers, gamma, 'o--', color='C0',linewidth=1,markersize=4)
-    ax.set_xlabel("Lag distance (m)")
-    ax.set_ylabel("Semivariance")
+    
 
     # Overlay model if wanted and given
     if (plot_model) and (model_name is not None) and (model_fct is not None):
         h = np.arange(0,centers.max(),10000)
         ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{model_name} fit')
-        plt.legend()
+        if (model_name != 'composite') and (model_params is not None) :
+            ax.vlines(model_params['range'],0,max(gamma),color="#FF1E00",linestyle='--',alpha=0.2,label='range')
+            ax.hlines(model_params['sill']+model_params['nugget'],0,max(centers),color="#BD6D12",linestyle='--',alpha=0.2,label='sill')
+        elif (model_name =='composite') and (model_params is not None) :
+            ax.vlines(gutils.effective_range(centers,model_fct,0.95),0,max(gamma),color='#FF1E00',linestyle='--',alpha=0.2,label='range')
+            ax.hlines(model_params['sill1']+model_params['sill2']+model_params['nugget'],0,max(centers),color='#BD6D12',linestyle='--',alpha=0.2,label='sill')
+        if ax_ is None : plt.legend()
     
     width = centers[1]-centers[0]
     # Overlay bins counts if given
@@ -99,10 +111,15 @@ def plot_variogram_from_bins_and_gamma(centers,
         if std_counts is not None :
             ax2.bar(centers, std_counts, width = width,
                     color='blue', alpha=0.1, label='Pair counts std')
+    ax.set_xlim(0, centers.max()+width)
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.4)
+    ax.set_xlabel("Lag distance [m]")
+    ax.set_ylabel("Semivariance")
     
-    plt.title(f"Empirical variogram — {time}")
-    plt.xlim(0, centers.max()+width)
-    plt.grid(True, alpha=0.4)
-    plt.show()
-
-    return fig,ax
+    if ax_ is None :
+        plt.title(f"Empirical variogram — {time}")
+        if save_name is not None:
+            plt.savefig(save_name,dpi=500,bbox_inches='tight')
+        return fig,ax
+    return ax
