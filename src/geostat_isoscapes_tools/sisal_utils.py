@@ -266,7 +266,7 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
     ''' This functions converts calcite d18O (V-PDB standards) values to their drip water equivalent (V-SMOW standard), 
     using the mineralogy and temperature associated to each sample to convert.
     Input : 
-        - caclite_df : DataFrame including columns d18O_meansurement (float64),T (float64), mineralogy (str)
+        - caclite_df : DataFrame including columns d18O_meansurement (float64),T (float64) in K, mineralogy (str)
     Outout :
         - converted_df : copy of calcite_df with an extra column d180p_VSMOW containing the drip water d18O V-SMOW values.
     '''
@@ -275,15 +275,24 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
                       'aragonite':[18.34,31.954]
                       }
     converted_data = calcite_df.copy()
-    converted_data['d18Op_VSMOW'] = pd.NA
+    converted_data['d18Op_VSMOW'] = np.nan
 
     for mineralogy in ['calcite','aragonite']:
         mask = converted_data["mineralogy"]==mineralogy
         d18O = converted_data.loc[mask,'d18O_measurement']
         T = converted_data.loc[mask,'T']
         c0,c1 = conversion_cst[mineralogy]
-        converted_data.loc[mask,'d18Op_VSMOW'] = 1.03092*d18O + 30.92 - ( c0*1000/T - c1 )
-        print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
+        
+        # convert PDB to VSMOW standard
+        converted_data.loc[mask,'d18Oc_VSMOW'] = 1.03092*d18O + 30.92 
+        
+        # use Tremaine equation to define the calcite-to-water fractionation factor
+        alpha =  np.exp((( c0*1000/T.astype(float) - c1) / 1000))
+        
+        # use the definition of a fractionation factor and the definition of the delta 18O to convert calcite delta 18O to its water equivalent
+        converted_data.loc[mask,'d18Op_VSMOW_exactconv'] = (1000 + converted_data.loc[mask,'d18Oc_VSMOW']) /alpha - 1000 
+        converted_data.loc[mask,'d18Op_VSMOW_linearized'] = 1.03092*d18O + 30.92 - ( c0*1000/T.astype(float) - c1 ) # orig. from Comas-Bru 2019 : wrong ? 
+        # print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
 def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chrono : str , method : str = 'linear') -> DataFrame :
@@ -432,7 +441,7 @@ def plot_global_map(data:DataFrame,
         text=data[quantity_col],
         mode="markers",
         marker=dict(
-            symbol="triangle-up",
+            symbol="square",
             size=10,
             color=data[quantity_col],
             colorscale="icefire",   # modern colormap
