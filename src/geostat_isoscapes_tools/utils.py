@@ -29,7 +29,7 @@ def mask_country_shape(da : xr.DataArray | pd.DataFrame,
                        country_names: list[str] = ["China"], 
                        all_touched : bool = True, 
                        shapefile : str = "../data/shapefiles/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp",
-                       buffer_km : int = 0, 
+                       buffer_km : float = 0, 
                        ) -> xr.DataArray | pd.DataFrame :
     """ This functions defines a mask for the given country (polygone) and filters the points of the provided data array
     (which should have coords lon and lat) according to this mask. If all_touched is set to True (default), the mask 
@@ -54,13 +54,18 @@ def mask_country_shape(da : xr.DataArray | pd.DataFrame,
     if isinstance(da, xr.DataArray):
         # grid
         lat, lon = da.lat.values, da.lon.values
+        
+        # if longitudes are defined on the interval 0° to 360°, convert it to -180° to 180°
+        if any(lon>180):
+            lon = (lon + 180) % 360 - 180
+
         lon2d, lat2d = np.meshgrid(lon,lat) #type:ignore
         # def mask
         if all_touched :
             dx = abs(lon[1] - lon[0])/2
             dy = abs(lat[1] - lat[0])/2
             mask = np.zeros_like(lon2d, dtype=bool)
-            # Check if any of the 4 corners of each pixel is inside the chinese polygone
+            # Check if any of the 4 corners of each pixel is inside the desired polygone
             for dlon in (-dx, dx):
                 for dlat in (-dy, dy):
                     corners = shapely.points(np.column_stack((lon2d.ravel() + dlon, lat2d.ravel() + dlat)))
@@ -70,12 +75,14 @@ def mask_country_shape(da : xr.DataArray | pd.DataFrame,
         
         masked_da = da.where(mask)
         return masked_da
+    
     elif isinstance(da, pd.DataFrame):
         if not {'lon', 'lat'}.issubset(da.columns):
             raise ValueError("DataFrame must contain lon/lat columns")
         points = shapely.points(da[['lon', 'lat']].to_numpy())
         mask = shapely.contains(geom, points)
         return da.loc[mask].reset_index(drop=True) #type:ignore
+    
     else:
         raise TypeError("Input must be an xarray.DataArray or pandas.DataFrame")
 

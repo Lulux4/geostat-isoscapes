@@ -10,6 +10,7 @@ import skgstat as skg
 from scipy.optimize import curve_fit
 from tqdm import tqdm 
 import pandas as pd
+from . import utils,sisal_utils
 
 # ==========================================================
 # Coordinates projections 
@@ -110,7 +111,7 @@ def variogram_with_gstat(df,
     """
     # check if the month contains too much samples. If so, sample it down to the sample_size.
     if len(df) > sample_size:
-        print('downsampling')
+        # print('downsampling')
         df = df.sample(sample_size, random_state=seed)
     
     vals = df[quantity].values
@@ -186,9 +187,9 @@ def iterative_variogram_computations(df,ref_bins = None,direction=None):
     """ TODO 
     """
     df['x'], df['y'] = project_coords(df['lon'].values, df['lat'].values, epsg="EPSG:3857")
-    print('initializing loop...')
+    print('-> initializing loop...')
     bin_counts, gammas = [], []
-    print('starting loop...')
+    print('   starting loop...')
     for t, g in tqdm(df.groupby('time')):
         if g['d18Op'].notna().sum() < 30:
             continue
@@ -212,7 +213,7 @@ def iterative_variogram_computations(df,ref_bins = None,direction=None):
             gammas.append(g_exp)
                 
         except Exception as e:
-            print(f"Skipped {t}: {e}")
+            print(f"   Skipped {t}: {e}")
     print('finished loop') 
     return bin_counts, gammas, ref_bins
 
@@ -341,3 +342,70 @@ def make_fitted_model_func(f,*args,**kwargs):
     def func(h):
         return f(h,*args,*kwargs)
     return func
+
+
+# =============================================
+# KRIGING
+# =============================================
+def get_sisal_data_for_kriging(chrono : str = 'interp_age',
+                               res : int = 200, 
+                               temp_ds_fn : str = '../data/temperature/temp_800ka_ann.nc',
+                               countries : list = ['China'],
+                               buffer_km : float = 500,
+                               conversion : str = 'd18Op_VSMOW_exactconv'):
+    """ Load SISAL data, sanatize it, convert it to drip water equivalents, sclice at the desired temporal resolution ."""
+    
+    data_df = sisal_utils.get_basic_cleaned_merged_sisal_data(chrono=chrono)
+
+    # load temperature dataset
+    temp_xda = utils.load_xarray_datarray(temp_ds_fn).temp
+
+    # compute converted data
+    data_df_drip_water = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,chrono=chrono,temp_xda=temp_xda,method='linear')
+    # remove samples for which the conversion failed (usually due to T retrieval failure)
+    data_df_drip_water = data_df_drip_water.dropna(subset=conversion)
+
+    # Bin years to the desired temporal resolution
+    chrono_series = data_df_drip_water['interp_age'].copy()
+    data_df_drip_water['binned_interp_age'] = utils.slice_in_equal_bins(chrono_series,res)
+
+    data_df_drip_water = data_df_drip_water.rename(columns={'latitude':'lat','longitude':'lon'})
+
+    data_ready = utils.mask_country_shape(data_df_drip_water,buffer_km=buffer_km,country_names=countries)
+
+    data_ready = data_ready.rename(columns={'lat':'latitude','lon':'longitude'}) # type:ignore
+
+    return data_ready
+
+
+def get_itracedata_for_external_drift(res=None,
+                                      fn_itrace_H218O = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN_H218O.800001-899912.nc',
+                                      fn_itrace_H2OTR = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN_H2OTR.800001-899912.nc',
+                                      countries : list = ['China'],
+                                      buffer_km : float = 500,):
+    # load files 
+    file_H218O = utils.load_xarray_datarray(fn_itrace_H218O)
+    file_H2OTR = utils.load_xarray_datarray(fn_itrace_H2OTR)
+    # compute the delta18Op
+    h218o = file_H218O.RAIN_H218O
+    h2o = file_H2OTR.RAIN_H2OTR
+    delta18 = ( h218o/h2o - 1.0) * 1000.0
+    delta18 = delta18.where((h2o > 1e-12)&(delta18 < 1e2))  # avoid div by near-0 precip values and positive outliers (delta18 should be mostly negative and small -20/+20)
+    # make the temporal resolution regular 
+    time_series = pd.Series(delta18.time.values)
+    if res is None :
+        maxres = time_series.sort_values().diff().max()
+        print(f'-> regular temporal resolution of {maxres} days')
+        res = maxres
+    tmin, tmax = float(delta18.time.min()), float(delta18.time.max())
+    bins = np.arange(tmin, tmax + int(res), int(res)) #type:ignore
+
+    da_binned = delta18.groupby_bins('time', bins=bins).mean()
+    da_binned = da_binned.rename({'time_bins': 'time'})
+    delta18_binned = da_binned.assign_coords(time=bins[:-1])
+
+    countries_da_binned = utils.mask_country_shape(delta18_binned,buffer_km=buffer_km,country_names=countries)
+    
+    countries_df = countries_da_binned.to_dataframe(name='d18Op').reset_index().dropna() # type:ignore
+    countries_df = countries_df.rename(columns={'lon':'longitude','lat':'latitude'})
+    return countries_df
