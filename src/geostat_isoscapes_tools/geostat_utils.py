@@ -11,6 +11,7 @@ from scipy.optimize import curve_fit
 from tqdm import tqdm 
 import pandas as pd
 from . import utils,sisal_utils
+from scipy.interpolate import RegularGridInterpolator
 
 # ==========================================================
 # Coordinates projections 
@@ -39,11 +40,11 @@ def project_coords(lons,lats,epsg="EPSG:3857"):
     return xs, ys 
 
 # =========================================================
-# Useful functions for variogram computation using libraries
+# Useful functions for detrending data
 # =========================================================
 
-def detrend_data(coords, vals):
-    ''' detrend: fit plane z ~ x + y via a linear regression and subtract it to vals.
+def detrend_data_plane(coords, vals):
+    ''' detrend data by fitting plane z ~ x + y via a linear regression and subtract it to vals.
     Returns the residuals
     '''
     lr = LinearRegression().fit(coords, vals)
@@ -51,6 +52,103 @@ def detrend_data(coords, vals):
     resid = vals - trend
     return resid
 
+def detrend_multilinear(df_to_detrend, 
+                        value_col="d18Op",
+                        lat_col : str| None ="lat",
+                        lon_col : str| None ="lon",
+                        elev_col : str| None ="elevation",
+                        dist_col : str| None ="dist_to_coast",
+                        include_lon=False,
+                        include_lat=True,
+                        include_elev=False,
+                        include_dcoast=False):
+    """
+    Fit and remove a physically-based multilinear trend:
+    trend = b0 + b_lat*lat + b_lat2*lat^2 + b_elev*elev + b_dist*dist + b_lon*lon
+    Inputs :
+        - df : pandas DataFrame. Must contain columns: value_col, lat_col, elev_col, dist_col (+ lon if include_lon=True)
+        - include_lon : bool. Whether to include longitude term in the trend model (default False)
+        - similar for all include_xxx
+    Outputs:
+        - df_out : DataFrame. Copy of df with added columns: 'trend', 'residual'
+        - beta : model parameters
+        - full_r2 : r2 of the trend model
+
+    """
+    df = df_to_detrend.copy()
+    # Build design matrix
+    X_cols = []
+    if include_lat:
+        df['lat2'] = df[lat_col] **2
+        X_cols.append('lat')
+        X_cols.append('lat2')
+    if include_lon:
+        X_cols.append(lon_col)
+    if include_elev:
+        X_cols.append(elev_col)
+    if include_dcoast:
+        X_cols.append(dist_col)
+    if len(X_cols)==0:
+        raise ValueError('Must set at least one of the include_xxx parameters to True!')
+    
+    X = df[X_cols].values
+    y = df[value_col].values
+    # 
+    print('The predictors are ', X_cols)
+    # Fit and get contributions
+    contributions, beta = partial_r2_by_predictor(X, y,X_cols)
+
+    # Compute fitted trend
+    df['trend'] = beta[0] + X @ beta[1:] 
+
+    # Detrend
+    df['residual'] = y - df['trend'].values
+
+    # Full Rsquare:
+    sst = np.sum((y - y.mean())**2)
+    ssr = np.sum((y - df['trend'].values)**2)
+    full_r2 = 1 - ssr / sst
+
+    return df, full_r2, contributions, beta
+
+def partial_r2_by_predictor(X, y,predictors):
+    """
+    Compute partial R^2 for each predictor in a linear model.
+    X: 2D array (n, p) of predictors
+    y: 1D array (n,)
+    """
+
+    # constant intercept
+    X_full = np.column_stack([np.ones(len(X)), X])
+    
+    # full model
+    beta_full = np.linalg.lstsq(X_full, y, rcond=None)[0]
+    resid_full = y - X_full @ beta_full
+    ssr_full = np.sum(resid_full**2)
+    
+    # total variance
+    sst = np.sum((y - y.mean())**2)
+
+    p = X.shape[1]
+    contributions = {}
+
+    for j in range(p):
+        # Remove predictor j
+        X_reduced = np.column_stack([np.ones(len(X)), np.delete(X, j, axis=1)])
+        beta_reduced = np.linalg.lstsq(X_reduced, y, rcond=None)[0]
+        resid_reduced = y - X_reduced @ beta_reduced
+        ssr_reduced = np.sum(resid_reduced**2)
+
+        # Partial R square
+        r2_j = (ssr_reduced - ssr_full) / sst
+        contributions[predictors[j]] = r2_j
+
+    return contributions, beta_full
+
+
+# =========================================================
+# Useful functions for variogram computation 
+# =========================================================
 def geodesic_condensed_distances(lonlat):
     """
     Compute condensed vector of all pairwise geodesic distances (in meters)
@@ -98,7 +196,7 @@ def variogram_with_gstat(df,
                          quantity:str,
                          sample_size=3000,
                          direction : int | None = None,
-                         trend_removal=False, 
+                         trend: str|None = None, 
                          nlags : int = 30, 
                          maxlag : float | str | None = 'median', 
                          centers : np.ndarray | None = None,
@@ -115,12 +213,25 @@ def variogram_with_gstat(df,
         df = df.sample(sample_size, random_state=seed)
     
     vals = df[quantity].values
-    
-    if trend_removal :
-        # Remove trend by fitting a plane 
-        XY = np.column_stack((df['x'], df['y']))
-        vals = detrend_data(XY,df[quantity].values)
-
+    if trend is not None: 
+        if trend=='plane':
+            # Remove trend by fitting a plane 
+            XY = np.column_stack((df['x'], df['y']))
+            vals = detrend_data_plane(XY,df[quantity].values)
+        elif 'multilinear' in trend:
+            # Remove trend by fitting a multilinear trend based on possibly many predictors : latitude (by default), elevation...
+            df_detrended, r2, contributions, _ = detrend_multilinear(df,
+                                                            value_col=quantity,
+                                                            lat_col='lat',
+                                                            lon_col='lon',
+                                                            elev_col='elevation' if ('elevation' in df.columns)&('elev' in trend) else None,
+                                                            dist_col='dist_coast_m' if ('dist_coast_m' in df.columns)&('dcoast' in trend) else None,
+                                                            include_lon='lon' in trend,
+                                                            include_lat='lat' in trend,
+                                                            include_elev='elev' in trend,
+                                                            include_dcoast='dcoast' in trend)
+            vals = df_detrended['residual'].values
+            print(f'-> detrending with multilinear model, full R^2={r2:.3f}, contributions: {contributions}')
     # Compute the variogram 
     if direction is None :
         if centers is None :
@@ -183,7 +294,7 @@ def make_fixed_bin_func(centers):
 # Iterative variogram computations
 # =========================================================================
 
-def iterative_variogram_computations(df,ref_bins = None,direction=None):
+def iterative_variogram_computations(df,ref_bins = None,direction=None,trend='plane'):
     """ TODO 
     """
     df['x'], df['y'] = project_coords(df['lon'].values, df['lat'].values, epsg="EPSG:3857")
@@ -197,7 +308,7 @@ def iterative_variogram_computations(df,ref_bins = None,direction=None):
             if ref_bins is None :
                 b, g_exp, bin_count,_ = variogram_with_gstat(g,
                                                              quantity='d18Op',
-                                                             trend_removal=True,
+                                                             trend=trend,
                                                              maxlag='median',
                                                              direction=direction,
                                                              return_Variogram_object=False) # type: ignore
@@ -206,7 +317,7 @@ def iterative_variogram_computations(df,ref_bins = None,direction=None):
                 b, g_exp, bin_count,_ = variogram_with_gstat(g,
                                                              quantity='d18Op',
                                                              direction=direction,
-                                                             trend_removal=True,
+                                                             trend=trend,
                                                              centers=ref_bins,
                                                              return_Variogram_object=False) # type: ignore    
             bin_counts.append(bin_count)
@@ -381,8 +492,9 @@ def get_sisal_data_for_kriging(chrono : str = 'interp_age',
 def get_itracedata_for_external_drift(res=None,
                                       fn_itrace_H218O = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN_H218O.800001-899912.nc',
                                       fn_itrace_H2OTR = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN_H2OTR.800001-899912.nc',
-                                      countries : list = ['China'],
-                                      buffer_km : float = 500,):
+                                      countries : list| None = None,
+                                      buffer_km : float = 500,
+                                      as_da=False):
     # load files 
     file_H218O = utils.load_xarray_datarray(fn_itrace_H218O)
     file_H2OTR = utils.load_xarray_datarray(fn_itrace_H2OTR)
@@ -404,8 +516,46 @@ def get_itracedata_for_external_drift(res=None,
     da_binned = da_binned.rename({'time_bins': 'time'})
     delta18_binned = da_binned.assign_coords(time=bins[:-1])
 
-    countries_da_binned = utils.mask_country_shape(delta18_binned,buffer_km=buffer_km,country_names=countries)
+    if countries is not None :
+        delta18_binned = utils.mask_country_shape(delta18_binned,buffer_km=buffer_km,country_names=countries)
+    if as_da : 
+        return delta18_binned
+    data_df = delta18_binned.to_dataframe(name='d18Op').reset_index().dropna() # type:ignore
+    data_df = data_df.rename(columns={'lon':'longitude','lat':'latitude'})
+    return data_df
+
+# =========================================================================
+# External variables interpolation
+# ========================================================================
+def interpolate_dem_at_latlon_points(df_latlon,dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc"):
+    """ TODO 
+    lat : -90 to 90
+    lon : 0 to 360
+    """
+    df = df_latlon.copy()
+    # Load global elevation grid (ETOPO for instance)
+    ds = xr.open_dataset(dem_file) # ds must have lat/lon coords and z variable
+    lats_dem = ds['lat'].values
+    lons_dem = ds['lon'].values
+    elevation_grid = ds['z'].values
+
+    # interpolation at df points
+    interp_elev = RegularGridInterpolator(
+        (lats_dem, lons_dem),
+        elevation_grid,
+        bounds_error=False,
+        fill_value=np.nan
+    )
+
+    lats_df = df['lat'].values
+    lons_df = utils.convert_lon_0_360_to_neg180_180(df['lon'].values) # type:ignore
+
+    elev_at_obs = interp_elev(np.column_stack([lats_df, lons_df])) # type: ignore
+    df['elevation'] = elev_at_obs
+
+    # we seen there are points at -6000m (indonesia, in the ocean). This is a problem since I suppose that itrace simulation only models terrestrial points, but there was a buffer wround the coast that included some points in the ocean.
+    # either i must manage to mask these points, or clip the values to sea level (or -423m, the lowest surface elevation?)
+    df.loc[df['elevation']<0,'elevation']=0
+    df = df.dropna(subset=['elevation'])
     
-    countries_df = countries_da_binned.to_dataframe(name='d18Op').reset_index().dropna() # type:ignore
-    countries_df = countries_df.rename(columns={'lon':'longitude','lat':'latitude'})
-    return countries_df
+    return df

@@ -21,7 +21,7 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
         transform=ccrs.PlateCarree(),
         cmap="viridis",
         cbar_kwargs={"label": dataarray_slice.name},
-        robust=True
+        robust=True # robust to large outliers
     ) #type: ignore
     
     if countries_borders :
@@ -44,10 +44,68 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
     ax.set_title(f"{title} - {time}")
     return fig, ax
 
-def plot_projected_data(coords_proj,vals_s, projection_str='Mercator'):
+def plot_isoscape_latlon_platecarree_df(
+        df,
+        time: str,
+        title: str = "Values of d18O",
+        countries_borders: bool = False
+    ):
+    """
+    Plot the given dataframe with columns: lat, lon, d18O on PlateCarree projection.
+    """
+    fig, ax = plt.subplots(figsize=(10, 5),
+                           subplot_kw={"projection": ccrs.PlateCarree()})
+
+    # Scatter plot of irregular points
+    sc = ax.scatter(
+        df["lon"],
+        df["lat"],
+        c=df["d18O"],
+        cmap="viridis",
+        transform=ccrs.PlateCarree(),
+        s=20,
+        edgecolor="none"
+    )
+
+    cbar = plt.colorbar(sc, ax=ax, label="d18O")
+    if countries_borders:
+        country_borders = cfeature.NaturalEarthFeature(
+            category='cultural',
+            name='admin_0_boundary_lines_land',
+            scale='50m',
+            facecolor='none'
+        )
+        ax.add_feature(country_borders, edgecolor='gray') # type:ignore
+    ax.coastlines() # type:ignore
+    valid = df.dropna(subset=["lat", "lon", "d18O"])
+    ax.set_extent([         #type:ignore
+        valid["lon"].min(),
+        valid["lon"].max(),
+        valid["lat"].min(),
+        valid["lat"].max()
+    ], crs=ccrs.PlateCarree())
+    ax.set_title(f"{title} - {time}")
+
+    return fig, ax
+
+
+def plot_projected_data(coords_proj,vals_s, projection_str='Mercator',robust=True):
     if projection_str == 'Mercator':
         projection = ccrs.Mercator()
     
+    # nan mask
+    nan_mask = np.isnan(vals_s)
+    vals_s= vals_s[~nan_mask]
+    coords_proj = coords_proj[~nan_mask,:]
+    if robust:
+        # clip outliers to make robust colormap
+        q_low, q_high = np.quantile(vals_s, [0.005, 0.995])
+        if q_low == q_high:
+            vmin, vmax = float(vals_s.min()), float(vals_s.max())
+        else:
+            vmin, vmax = float(q_low), float(q_high)
+        vals_s = np.clip(vals_s, vmin, vmax)
+
     fig, ax = plt.subplots(subplot_kw={"projection": projection})
     sc = ax.scatter(coords_proj[:,0],coords_proj[:,1], c=vals_s, s=20, cmap="viridis", transform=projection, alpha=0.9, edgecolor="k", linewidth=0.1)
     ax.coastlines(resolution="50m") # type: ignore
@@ -123,3 +181,41 @@ def plot_variogram_from_bins_and_gamma(centers,
             plt.savefig(save_name,dpi=500,bbox_inches='tight')
         return fig,ax
     return ax
+
+def plot_elevation_map( df, countries_borders: bool = False) -> tuple[Figure, Axes]:
+    """ Plot an elevation map from given latitudes, longitudes and elevation grid.
+    """
+    fig, ax = plt.subplots(figsize=(10, 5),
+                           subplot_kw={"projection": ccrs.PlateCarree()})
+
+    sc = ax.scatter(df['lon'], df['lat'], c=df['elevation'], cmap='terrain', s=2, edgecolor=None)
+    cbar = plt.colorbar(sc, ax=ax, orientation='vertical', label='Elevation (m)')
+    if countries_borders:
+        country_borders = cfeature.NaturalEarthFeature(
+            category='cultural',
+            name='admin_0_boundary_lines_land',
+            scale='50m',
+            facecolor='none'
+        )
+        ax.add_feature(country_borders, edgecolor='gray') #type:ignore
+    ax.coastlines() # type:ignore
+    return fig, ax
+
+def plot_dist_to_coast_map(df,countries_borders: bool = False) -> tuple[Figure, Axes]:
+    """ Plot a distance to coast map from given df containing latitudes, longitudes and distance to coast grid.
+    """
+    fig, ax = plt.subplots(figsize=(10, 5),
+                           subplot_kw={"projection": ccrs.PlateCarree()})
+
+    sc = ax.scatter(df['lon'], df['lat'], c=df['dist_coast_m'], cmap='viridis', s=2, edgecolor=None)
+    cbar = plt.colorbar(sc, ax=ax, orientation='vertical', label='Distance to coast (km)')
+    if countries_borders:
+        country_borders = cfeature.NaturalEarthFeature(
+            category='cultural',
+            name='admin_0_boundary_lines_land',
+            scale='50m',
+            facecolor='none'
+        )
+        ax.add_feature(country_borders, edgecolor='gray') #type:ignore
+    ax.coastlines() # type:ignore
+    return fig, ax
