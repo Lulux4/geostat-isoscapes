@@ -57,7 +57,9 @@ def mask_country_shape(da : xr.DataArray | pd.DataFrame,
         
         # if longitudes are defined on the interval 0° to 360°, convert it to -180° to 180°
         if any(lon>180):
-            lon = (lon + 180) % 360 - 180
+            lon = convert_lon_0_360_to_neg180_180(lon)
+        if any(lat>90):
+            lat = convert_lat_0_180_to_neg90_90(lat)
 
         lon2d, lat2d = np.meshgrid(lon,lat) #type:ignore
         # def mask
@@ -85,4 +87,12 @@ def mask_country_shape(da : xr.DataArray | pd.DataFrame,
     
     else:
         raise TypeError("Input must be an xarray.DataArray or pandas.DataFrame")
+
+def convert_lon_0_360_to_neg180_180(lon:np.ndarray) ->np.ndarray:
+    """ Converts longuitudes in the interval O to 360 degreees to -180 to 180 degrees"""
+    return (lon + 180) % 360 -180
+
+def convert_lat_0_180_to_neg90_90(lat:np.ndarray) ->np.ndarray:
+    """ Converts latitudes in the interval 0 to 180 degreees to -90 to 90 degrees"""
+    return (lat + 90) % 180 -90
 
