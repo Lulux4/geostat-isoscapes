@@ -12,6 +12,9 @@ from tqdm import tqdm
 import pandas as pd
 from . import utils,sisal_utils
 from scipy.interpolate import RegularGridInterpolator
+from shapely.geometry import Point
+from shapely.ops import nearest_points
+import geopandas as gpd
 
 # ==========================================================
 # Coordinates projections 
@@ -58,10 +61,12 @@ def detrend_multilinear(df_to_detrend,
                         lon_col : str| None ="lon",
                         elev_col : str| None ="elevation",
                         dist_col : str| None ="dist_to_coast",
+                        prect_col :str | None = 'prect',
                         include_lon=False,
                         include_lat=True,
                         include_elev=False,
-                        include_dcoast=False):
+                        include_dcoast=False,
+                        include_prect=False):
     """
     Fit and remove a physically-based multilinear trend:
     trend = b0 + b_lat*lat + b_lat2*lat^2 + b_elev*elev + b_dist*dist + b_lon*lon
@@ -73,7 +78,6 @@ def detrend_multilinear(df_to_detrend,
         - df_out : DataFrame. Copy of df with added columns: 'trend', 'residual'
         - beta : model parameters
         - full_r2 : r2 of the trend model
-
     """
     df = df_to_detrend.copy()
     # Build design matrix
@@ -81,13 +85,16 @@ def detrend_multilinear(df_to_detrend,
     if include_lat:
         df['lat2'] = df[lat_col] **2
         X_cols.append('lat')
-        X_cols.append('lat2')
+        X_cols.append('lat2') # because i know that the latitude effect occurs as we go towards both poles.
     if include_lon:
         X_cols.append(lon_col)
     if include_elev:
         X_cols.append(elev_col)
     if include_dcoast:
         X_cols.append(dist_col)
+    if include_prect:
+        X_cols.append(prect_col)
+    # Check that at least one predictor is included
     if len(X_cols)==0:
         raise ValueError('Must set at least one of the include_xxx parameters to True!')
     
@@ -104,10 +111,8 @@ def detrend_multilinear(df_to_detrend,
     # Detrend
     df['residual'] = y - df['trend'].values
 
-    # Full Rsquare:
-    sst = np.sum((y - y.mean())**2)
-    ssr = np.sum((y - df['trend'].values)**2)
-    full_r2 = 1 - ssr / sst
+    # Full R^2:
+    full_r2 = utils.compute_r2(y,df['trend'].values)
 
     return df, full_r2, contributions, beta
 
@@ -140,7 +145,7 @@ def partial_r2_by_predictor(X, y,predictors):
         ssr_reduced = np.sum(resid_reduced**2)
 
         # Partial R square
-        r2_j = (ssr_reduced - ssr_full) / sst
+        r2_j = (ssr_reduced - ssr_full)/sst
         contributions[predictors[j]] = r2_j
 
     return contributions, beta_full
@@ -226,10 +231,12 @@ def variogram_with_gstat(df,
                                                             lon_col='lon',
                                                             elev_col='elevation' if ('elevation' in df.columns)&('elev' in trend) else None,
                                                             dist_col='dist_coast_m' if ('dist_coast_m' in df.columns)&('dcoast' in trend) else None,
+                                                            prect_col='prect' if ('prect' in df.columns)&('prect' in trend) else None,
                                                             include_lon='lon' in trend,
                                                             include_lat='lat' in trend,
                                                             include_elev='elev' in trend,
-                                                            include_dcoast='dcoast' in trend)
+                                                            include_dcoast='dcoast' in trend,
+                                                            include_prect='prect' in trend)
             vals = df_detrended['residual'].values
             print(f'-> detrending with multilinear model, full R^2={r2:.3f}, contributions: {contributions}')
     # Compute the variogram 
@@ -289,6 +296,24 @@ def make_fixed_bin_func(centers):
         # print('edge shape :',edges.shape, ' centers shape :',centers.shape)
         return centers, edges
     return fixed
+
+def get_weights_from_pair_counts(pair_counts: np.ndarray) -> np.ndarray :
+    """ Computes the array of weigths associated to each bin from the pair count in the bin. 
+    This is useful for computing weighted R^2 of variogram models, for instance.
+    """
+    mask_nans = np.isnan(pair_counts)
+    weights = np.zeros_like(pair_counts,dtype=float)
+    weights[~mask_nans] = np.sqrt(pair_counts[~mask_nans])
+    return weights
+
+def get_vario_parameters_dict(parameters):
+    # retrieve the model parameters and give them the correct name:
+    if len(parameters) == 3:
+        range_, sill, nugget = parameters
+        return {'range':range_,'sill':sill,'nugget':nugget}
+    else:
+        print('Parameters are ',parameters)
+        raise NotImplementedError('TODO : implement parameters retrieval for this case')
 
 # =========================================================================
 # Iterative variogram computations
@@ -488,53 +513,122 @@ def get_sisal_data_for_kriging(chrono : str = 'interp_age',
 
     return data_ready
 
-
 def get_itracedata_for_external_drift(res=None,
-                                      fn_itrace_H218O = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN_H218O.800001-899912.nc',
-                                      fn_itrace_H2OTR = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN_H2OTR.800001-899912.nc',
+                                      itrace_data_folder = '../data/modern/iTrace/',
+                                      itrace_sim_prefix = 'b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.',
+                                      itrace_sim_suffix = '.800001-899912',
+                                      include_snow = True,
                                       countries : list| None = None,
                                       buffer_km : float = 500,
-                                      as_da=False):
+                                      prect_da = False,
+                                      delta18_da = False):
+    """ TODO """
+    # files to find and read :
+    fn_itrace_RAIN_H218O = f'{itrace_data_folder}{itrace_sim_prefix}RAIN_H218O{itrace_sim_suffix}.nc'
+    fn_itrace_RAIN_H2OTR = f'{itrace_data_folder}{itrace_sim_prefix}RAIN_H2OTR{itrace_sim_suffix}.nc'
+    fn_itrace_RAIN = f'{itrace_data_folder}{itrace_sim_prefix}RAIN{itrace_sim_suffix}.nc'
+    if include_snow :
+        fn_itrace_SNOW_H218O = f'{itrace_data_folder}{itrace_sim_prefix}SNOW_H218O{itrace_sim_suffix}.nc'
+        fn_itrace_SNOW_H2OTR = f'{itrace_data_folder}{itrace_sim_prefix}SNOW_H2OTR{itrace_sim_suffix}.nc'    
+        fn_itrace_SNOW = f'{itrace_data_folder}{itrace_sim_prefix}SNOW{itrace_sim_suffix}.nc'
+
     # load files 
-    file_H218O = utils.load_xarray_datarray(fn_itrace_H218O)
-    file_H2OTR = utils.load_xarray_datarray(fn_itrace_H2OTR)
+    file_rH218O = utils.load_xarray_datarray(fn_itrace_RAIN_H218O)
+    file_rH2OTR = utils.load_xarray_datarray(fn_itrace_RAIN_H2OTR)
+    if include_snow :
+        file_sH218O = utils.load_xarray_datarray(fn_itrace_SNOW_H218O)
+        file_sH2OTR = utils.load_xarray_datarray(fn_itrace_SNOW_H2OTR)
+    
     # compute the delta18Op
-    h218o = file_H218O.RAIN_H218O
-    h2o = file_H2OTR.RAIN_H2OTR
+    h218o = file_rH218O.RAIN_H218O
+    h2o = file_rH2OTR.RAIN_H2OTR
+    if include_snow :
+        h218o += file_sH218O.SNOW_H218O
+        h2o += file_sH2OTR.SNOW_H2OTR
+
     delta18 = ( h218o/h2o - 1.0) * 1000.0
-    delta18 = delta18.where((h2o > 1e-12)&(delta18 < 1e2))  # avoid div by near-0 precip values and positive outliers (delta18 should be mostly negative and small -20/+20)
-    # make the temporal resolution regular 
+    delta18 = delta18.where( (h2o> 1e-12) & (delta18 < 1e2) )  # avoid div by near-0 precip values and large positive outliers (delta18 should be mostly negative and small -20/+20)
+    
+    # Fix the temporal resolution 
     time_series = pd.Series(delta18.time.values)
     if res is None :
         maxres = time_series.sort_values().diff().max()
         print(f'-> regular temporal resolution of {maxres} days')
         res = maxres
-    tmin, tmax = float(delta18.time.min()), float(delta18.time.max())
-    bins = np.arange(tmin, tmax + int(res), int(res)) #type:ignore
-
-    da_binned = delta18.groupby_bins('time', bins=bins).mean()
-    da_binned = da_binned.rename({'time_bins': 'time'})
-    delta18_binned = da_binned.assign_coords(time=bins[:-1])
+    delta18_binned = utils.bin_xrDataArray_time(delta18,res=res)
 
     if countries is not None :
-        delta18_binned = utils.mask_country_shape(delta18_binned,buffer_km=buffer_km,country_names=countries)
-    if as_da : 
+        delta18_binned = utils.mask_country_shape(delta18_binned,buffer_km=buffer_km,country_names=countries)  
+
+    if prect_da :
+        # load netcdf files 
+        file_rain = utils.load_xarray_datarray(fn_itrace_RAIN)
+        precip_da = file_rain.RAIN
+        if include_snow :
+            file_snow = utils.load_xarray_datarray(fn_itrace_SNOW)
+            precip_da += file_snow.SNOW
+
+        # bin time to match delta18_binned resolution
+        binned_prect_da = utils.bin_xrDataArray_time(precip_da,res=res)
+        binned_prect_da = binned_prect_da * res * 24 * 3600 # type:ignore
+        if countries is not None :
+            binned_prect_da = utils.mask_country_shape(binned_prect_da,buffer_km=buffer_km,country_names=countries) 
+    # outputs differ depending on bools prect_da, delta18_da... Return df of xrdataarrays.
+    if delta18_da : 
+        if prect_da :
+            return delta18_binned, binned_prect_da
         return delta18_binned
+    
     data_df = delta18_binned.to_dataframe(name='d18Op').reset_index().dropna() # type:ignore
     data_df = data_df.rename(columns={'lon':'longitude','lat':'latitude'})
     return data_df
 
 # =========================================================================
-# External variables interpolation
+# External variables handling and interpolation
 # ========================================================================
-def interpolate_dem_at_latlon_points(df_latlon,dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc"):
+
+def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame, 
+                                        time : float,
+                                        res = 31,
+                                        variables : list[str]=['elev','dcoast','prect'],
+                                        dem_file : str = "../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",
+                                        coast_shapefile : str = "../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",
+                                        rain_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN.800001-899912.nc',
+                                        snow_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.SNOW.800001-899912.nc',       
+                                        ):
+    print(f'-> Adding external variables {variables}.')
+    df = df_orig.copy()
+    # check that latitude and longitudes are defined symetrically around 0° 
+    if any(df['lat'])>90:
+        df['lat']=utils.convert_lat_0_180_to_neg90_90(np.array(df['lat'].values))
+    if any(df['lon'])>180 :
+        df['lon']=utils.convert_lon_0_360_to_neg180_180(np.array(df['lon'].values))
+    
+    # add columns with the variables specified in argument
+    if 'elev' in variables :
+        print(f'   > elevation data will be taken from file {dem_file}')
+        df = interpolate_dem_at_latlon_points(df,dem_file = dem_file)
+    if 'dcoast' in variables:
+        print(f'   > coastlines will be taken from file {coast_shapefile}')
+        df = compute_distance_to_coast(df,coast_shapefile)
+    if 'prect' in variables :
+        print(f'Prect rain will be taken from file {rain_file} \nPrect snow file will be taken from file {snow_file}')
+        df = add_prect_to_itrace_df(df,time=time,res=res,rain_file=rain_file,snow_file=snow_file)
+    return df
+
+def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc"):
     """ TODO 
     lat : -90 to 90
-    lon : 0 to 360
+    lon : -180 to 180
     """
     df = df_latlon.copy()
+    if any(df['lon']>180):
+        df['lon']=utils.convert_lon_0_360_to_neg180_180(np.array(df['lon']))
+    if any(df['lat']>90):
+        df['lat']=utils.convert_lat_0_180_to_neg90_90(np.array(df['lat']))
+
     # Load global elevation grid (ETOPO for instance)
-    ds = xr.open_dataset(dem_file) # ds must have lat/lon coords and z variable
+    ds = xr.open_dataset(dem_file,engine='netcdf4') # ds must have lat/lon coords and z variable
     lats_dem = ds['lat'].values
     lons_dem = ds['lon'].values
     elevation_grid = ds['z'].values
@@ -548,7 +642,7 @@ def interpolate_dem_at_latlon_points(df_latlon,dem_file :str ="../data/elevation
     )
 
     lats_df = df['lat'].values
-    lons_df = utils.convert_lon_0_360_to_neg180_180(df['lon'].values) # type:ignore
+    lons_df = df['lon'].values
 
     elev_at_obs = interp_elev(np.column_stack([lats_df, lons_df])) # type: ignore
     df['elevation'] = elev_at_obs
@@ -557,5 +651,79 @@ def interpolate_dem_at_latlon_points(df_latlon,dem_file :str ="../data/elevation
     # either i must manage to mask these points, or clip the values to sea level (or -423m, the lowest surface elevation?)
     df.loc[df['elevation']<0,'elevation']=0
     df = df.dropna(subset=['elevation'])
+    
+    return df
+
+def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp"):
+    """
+    Add geodesic distance to nearest coastline (in meters) to a dataframe 
+    containing columns 'lat' and 'lon'.
+    Inputs:
+        df : pandas.DataFrame, it must contain 'lat' and 'lon' columns.
+        coast_shp_path : str, the path to a coastline shapefile.
+    Outputs:
+        df : pandas.DataFrame, same dataframe as input but with an extra column 'dist_coast_m'.
+    """
+    df = df_latlon.copy()
+
+    if any(df['lon']>180):
+        df['lon'] = utils.convert_lon_0_360_to_neg180_180(df['lon'].values)
+    if any(df['lat']>90):
+        df['lat'] = utils.convert_lat_0_180_to_neg90_90(df['lat'].values)
+    
+    coast = gpd.read_file(coast_shp_path).to_crs("EPSG:4326")
+
+    geod = Geod(ellps="WGS84")
+
+    distances = []
+    for _, row in df.iterrows():
+        pt = Point(row["lon"], row["lat"])
+        # find actual nearest geometry, not just BB neighbors
+        nearest_idx = coast.sindex.nearest(pt)[1]
+        nearest_geom = coast.geometry.iloc[nearest_idx]
+
+        # compute geodesic distance
+        p1, p2 = nearest_points(pt, nearest_geom)
+        _, _, dist = geod.inv(p1.iloc[0].x, p1.iloc[0].y, p2.iloc[0].x, p2.iloc[0].y) # type: ignore
+        distances.append(dist)
+
+    df["dist_coast_m"] = distances
+    return df
+
+def add_prect_to_itrace_df(df,
+                           time,
+                           res,
+                           rain_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN.800001-899912.nc',
+                           snow_file :str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.SNOW.800001-899912.nc' 
+                           ):
+    """ TODO
+    Prect = total atmospheric precipitation that reached the ground, including snowfall and rainfall, in water mm equivalents.
+    /!/ For consistency, rain and snow files must be the outputs of the same piece of simulation as the data in df : same grid, same time step.
+    inputs :
+        rain file must be a netcdf dataset containing variable RAIN and dimensions lat,lon,time
+        snow file must be a netcdf dataset containing variable SNOW and dimensions lat,lon,time
+    output: 
+        df
+    """
+    # load netcdf files 
+    file_rain = utils.load_xarray_datarray(rain_file)
+    file_snow = utils.load_xarray_datarray(snow_file)
+    # file_rain.info()
+    # file_snow.info()
+    rain_da = file_rain.RAIN
+    snow_da = file_snow.SNOW
+    
+    # compute total precip 
+    prect_da = rain_da + snow_da
+    
+    # bin time to match itrace_da resolution
+    binned_prect_da = utils.bin_xrDataArray_time(prect_da,res=res)
+    binned_prect_da = binned_prect_da * res * 24 * 3600 # convert the flux (precipitation rate) to the "res" days total (typicaly res=31 -> monthly amount) 
+    
+    df_prect=binned_prect_da.sel(time=time).to_dataframe(name='prect').reset_index().dropna(subset='prect') # type:ignore
+    
+    df_prect['lon'] = utils.convert_lon_0_360_to_neg180_180(df_prect['lon'])
+
+    df = pd.merge(df,df_prect,how='left',on=['lon','lat','time'])
     
     return df
