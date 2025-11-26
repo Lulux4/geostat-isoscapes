@@ -5,6 +5,9 @@ import numpy as np
 import shapely 
 from pyproj import CRS
 
+# =========================================================================================
+# MISC.TOOLS FOR DATA LOADING, BINNING, MASKING
+# =========================================================================================
 def load_xarray_datarray(fn: str) -> xr.Dataset:
     """ Just a function to open a netcdf dataset """
     with xr.open_dataset(filename_or_obj=fn, engine='netcdf4',decode_times=False) as file:
@@ -24,6 +27,19 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     bins = list(range(0, int(series.max())+ bin_width + 1, bin_width))
     binned_series = pd.cut(series, bins, labels = bins[:-1])
     return binned_series
+
+def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray : 
+    """ TODO """
+    tmin, tmax = float(da.time.min()), float(da.time.max())
+    bins = np.arange(tmin, tmax + int(res), int(res)) #type:ignore
+
+    da_binned = da.groupby_bins('time', bins=bins).mean()
+    da_binned = da_binned.rename({'time_bins': 'time'})
+    return da_binned.assign_coords(time=bins[:-1])
+
+def get_yrBP_from_itrace_time(days_after_start : int, start_year : int = 11700)->float:
+    """ TODO"""
+    return start_year + days_after_start / 365.0
 
 def mask_country_shape(da : xr.DataArray | pd.DataFrame, 
                        country_names: list[str] = ["China"], 
@@ -96,3 +112,15 @@ def convert_lat_0_180_to_neg90_90(lat:np.ndarray) ->np.ndarray:
     """ Converts latitudes in the interval 0 to 180 degreees to -90 to 90 degrees"""
     return (lat + 90) % 180 -90
 
+# =========================================================================================
+# STATISTICAL METRICS
+# =========================================================================================
+def compute_r2(y_true : np.ndarray, y_pred : np.ndarray, weights = None) -> float:
+    """ Computes the R^2 between true and predicted values 
+    """
+    if weights is None : 
+        weights = np.ones_like(y_true)
+    sst = np.nansum(weights * (y_true - np.nanmean(y_true))**2)
+    ssr = np.nansum(weights * (y_true - y_pred)**2)
+    r2 = 1 - (ssr / sst)
+    return r2

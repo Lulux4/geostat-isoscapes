@@ -5,12 +5,13 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 import xarray as xr
 import numpy as np
-from . import geostat_utils as gutils
+from . import utils, geostat_utils as gutils
 
 def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
                                      title :str = 'Values of d18Op', 
-                                     countries_borders : bool =False
+                                     countries_borders : bool =False,
+                                     cbar_label :str = r'$\delta^{18}$O [‰]',
                                      )-> tuple[Figure,Axes]:
     """ Plot the given isotope data array slice in platecarree projection.
     """
@@ -20,7 +21,7 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
         ax=ax,
         transform=ccrs.PlateCarree(),
         cmap="viridis",
-        cbar_kwargs={"label": dataarray_slice.name},
+        cbar_kwargs={"label": cbar_label},
         robust=True # robust to large outliers
     ) #type: ignore
     
@@ -149,13 +150,35 @@ def plot_variogram_from_bins_and_gamma(centers,
     if (plot_model) and (model_name is not None) and (model_fct is not None):
         h = np.arange(0,centers.max(),10000)
         ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{model_name} fit')
+        sill,range_,nugget= None,None,None
+        
         if (model_name != 'composite') and (model_params is not None) :
-            ax.vlines(model_params['range'],0,max(gamma),color="#FF1E00",linestyle='--',alpha=0.2,label='range')
-            ax.hlines(model_params['sill']+model_params['nugget'],0,max(centers),color="#BD6D12",linestyle='--',alpha=0.2,label='sill')
+            range_ = model_params['range']
+            sill = model_params['sill']+model_params['nugget']
+            nugget = model_params['nugget']
+            ax.vlines(range_,0,max(gamma),color="#FF1E00",linestyle='--',alpha=0.2,label=f"range")
+            ax.hlines(sill,0,max(centers),color="#BD6D12",linestyle='--',alpha=0.2,label=f"sill")
+        
         elif (model_name =='composite') and (model_params is not None) :
-            ax.vlines(gutils.effective_range(centers,model_fct,0.95),0,max(gamma),color='#FF1E00',linestyle='--',alpha=0.2,label='range')
-            ax.hlines(model_params['sill1']+model_params['sill2']+model_params['nugget'],0,max(centers),color='#BD6D12',linestyle='--',alpha=0.2,label='sill')
-        if ax_ is None : plt.legend()
+            range_ = gutils.effective_range(centers,model_fct,0.95)
+            sill = model_params['sill1']+model_params['sill2']+model_params['nugget']
+            nugget= model_params['nugget']
+            ax.vlines(range_,0,max(gamma),color='#FF1E00',linestyle='--',alpha=0.2,label=f'effective range')
+            ax.hlines(sill,0,max(centers),color='#BD6D12',linestyle='--',alpha=0.2,label=f"total sill")
+        if (range_ is not None) & (sill is not None) & (nugget is not None):
+            weights = None
+            if counts is not None : 
+                weights = gutils.get_weights_from_pair_counts(counts)
+            r2 = utils.compute_r2(gamma, model_fct(centers), weights=weights)
+            textstr = f"Range: {range_:.1e} m\nSill: {sill:.2f} ‰\nNugget: {nugget:.2f} ‰\nR²: {r2:.2f}"
+            ax.text(0.835, 0.22, textstr,
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    verticalalignment='bottom',
+                    horizontalalignment='left',
+                    bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.8)
+                    )
+        if ax_ is None : plt.legend(loc='lower right')
     
     width = centers[1]-centers[0]
     # Overlay bins counts if given
@@ -176,7 +199,7 @@ def plot_variogram_from_bins_and_gamma(centers,
     ax.set_ylabel("Semivariance")
     
     if ax_ is None :
-        plt.title(f"Empirical variogram — {time}")
+        plt.title(f"Empirical variogram - {time}")
         if save_name is not None:
             plt.savefig(save_name,dpi=500,bbox_inches='tight')
         return fig,ax
