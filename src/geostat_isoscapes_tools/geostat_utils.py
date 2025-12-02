@@ -101,7 +101,7 @@ def detrend_multilinear(df_to_detrend,
     X = df[X_cols].values
     y = df[value_col].values
     # 
-    print('The predictors are ', X_cols)
+    # print('The predictors are ', X_cols)
     # Fit and get contributions
     contributions, beta = partial_r2_by_predictor(X, y,X_cols)
 
@@ -206,8 +206,9 @@ def variogram_with_gstat(df,
                          maxlag : float | str | None = 'median', 
                          centers : np.ndarray | None = None,
                          model : str ='spherical',
-                         return_Variogram_object=False,
-                         seed = 42
+                         return_Variogram_object : bool = False,
+                         seed : int = 42,
+                         verbose : bool = True
                          )-> skg.Variogram | tuple[np.ndarray,np.ndarray, np.ndarray, object] :
     """Compute experimental variogram with sampling.
     TODO : write this fct doc 
@@ -238,7 +239,8 @@ def variogram_with_gstat(df,
                                                             include_dcoast='dcoast' in trend,
                                                             include_prect='prect' in trend)
             vals = df_detrended['residual'].values
-            print(f'-> detrending with multilinear model, full R^2={r2:.3f}, contributions: {contributions}')
+            if verbose :
+                print(f'-> detrending with multilinear model, full R^2={r2:.3f}, contributions: {contributions}')
     # Compute the variogram 
     if direction is None :
         if centers is None :
@@ -319,7 +321,7 @@ def get_vario_parameters_dict(parameters):
 # Iterative variogram computations
 # =========================================================================
 
-def iterative_variogram_computations(df,ref_bins = None,direction=None,trend='plane'):
+def iterative_variogram_computations(df,ref_bins = None,direction=None,trend='plane',verbose=False):
     """ TODO 
     """
     df['x'], df['y'] = project_coords(df['lon'].values, df['lat'].values, epsg="EPSG:3857")
@@ -336,7 +338,8 @@ def iterative_variogram_computations(df,ref_bins = None,direction=None,trend='pl
                                                              trend=trend,
                                                              maxlag='median',
                                                              direction=direction,
-                                                             return_Variogram_object=False) # type: ignore
+                                                             return_Variogram_object=False,
+                                                             verbose=verbose) # type: ignore
                 ref_bins = b
             else : 
                 b, g_exp, bin_count,_ = variogram_with_gstat(g,
@@ -344,7 +347,8 @@ def iterative_variogram_computations(df,ref_bins = None,direction=None,trend='pl
                                                              direction=direction,
                                                              trend=trend,
                                                              centers=ref_bins,
-                                                             return_Variogram_object=False) # type: ignore    
+                                                             return_Variogram_object=False,
+                                                             verbose = verbose) # type: ignore    
             bin_counts.append(bin_count)
             gammas.append(g_exp)
                 
@@ -483,27 +487,26 @@ def make_fitted_model_func(f,*args,**kwargs):
 # =============================================
 # KRIGING
 # =============================================
-def get_sisal_data_for_kriging(chrono : str = 'interp_age',
-                               res : int = 200, 
+def get_sisal_data_for_kriging(res : int = 200, 
                                temp_ds_fn : str = '../data/temperature/temp_800ka_ann.nc',
                                countries : list = ['China'],
                                buffer_km : float = 500,
                                conversion : str = 'd18Op_VSMOW_exactconv'):
     """ Load SISAL data, sanatize it, convert it to drip water equivalents, sclice at the desired temporal resolution ."""
     
-    data_df = sisal_utils.get_basic_cleaned_merged_sisal_data(chrono=chrono)
+    data_df = sisal_utils.get_basic_cleaned_merged_sisal_data()
 
     # load temperature dataset
     temp_xda = utils.load_xarray_datarray(temp_ds_fn).temp
 
     # compute converted data
-    data_df_drip_water = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,chrono=chrono,temp_xda=temp_xda,method='linear')
+    data_df_drip_water = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear')
     # remove samples for which the conversion failed (usually due to T retrieval failure)
     data_df_drip_water = data_df_drip_water.dropna(subset=conversion)
 
     # Bin years to the desired temporal resolution
-    chrono_series = data_df_drip_water['interp_age'].copy()
-    data_df_drip_water['binned_interp_age'] = utils.slice_in_equal_bins(chrono_series,res)
+    chrono_series = data_df_drip_water['age'].copy()
+    data_df_drip_water['binned_age'] = utils.slice_in_equal_bins(chrono_series,res)
 
     data_df_drip_water = data_df_drip_water.rename(columns={'latitude':'lat','longitude':'lon'})
 
