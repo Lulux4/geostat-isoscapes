@@ -24,7 +24,7 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     Outputs : 
         - binned_series : pd.Series containing the bin label associated of each item. 
     '''
-    bins = list(range(0, int(series.max())+ bin_width + 1, bin_width))
+    bins = list(range(int(series.min()), int(series.max())+ bin_width + 1, bin_width))
     binned_series = pd.cut(series, bins, labels = bins[:-1])
     return binned_series
 

@@ -1,8 +1,6 @@
 import pandas as pd
 from pandas import DataFrame
 import os 
-import plotly.graph_objects as go
-from plotly.graph_objects import Figure
 from xarray import DataArray
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np
@@ -122,32 +120,32 @@ def load_sisal():
             'entity_link_reference': entity_link_reference_df,
             'reference': reference_df }
 
-#### DATA PROCESSING
-def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
+#### DATA PREPROCESSING
+def clean_sisal_data(sisal_dict: dict) -> dict : 
     ''' Cleaning the table "sample_df" of the SISAL database to keep only valid samples, based on these criterions :
     1.  remove samples corresponding to superseded entities
     2.  remove samples with mixed mineralogy, keep only calcite or aragonite speleothems
-    3.  remove samples with no "chrono" age where "chrono" refers to the chronology to use
-    4.  remove samples with negative chronology (it is explicitel mentionned in SISAL read me that dates (yr BP) should be positive decimals)
+    [ DEPRECATED : 3.  remove samples with no "chrono" age where "chrono" refers to the chronology to use]
+    [ DEPRECATED : 4.  remove samples with negative chronology (it is explicitel mentionned in SISAL read me that dates (yr BP) should be positive decimals)]
+    3.  set age of samples from original chronology table and sisal chronology table if samples are missing in the original chronology table
     5.  remove samples for which we do not have a d18O measurement
     Inputs :
         - sisal_dict : dict of the sisal database as returned by function load_sisal()
-        - chrono : str referring to the chronology method of interest. 
+        [DEPRECATED - chrono : str referring to the chronology method of interest. 
                    Samples with no age provided by this chrono methods will be excluded.
-                   values : 'sisal-lin-interp','orig-chrono',... 
+                   values : 'sisal-lin-interp','orig-chrono',... #, chrono : str ='lin_interp_age']
     Output :
-        - clean_sisal_dict : dict containing ONLY the cleaned dataframes of sites, entities, samples, and chronology.
+        - clean_sisal_dict : dict containing ONLY the cleaned dataframes of sites, entities, samples.
     '''
     # Extract the dfs from sisal dict 
     site_df = sisal_dict['site']
     entity_df = sisal_dict['entity']
     sample_df = sisal_dict['sample']
     d18O_df   = sisal_dict['d18O']
-    if chrono == 'interp_age':
-        ckey = 'original_chronology'
-    else :
-        ckey = 'sisal_chronology'
-    chronology_df = sisal_dict[ckey]
+    composite_entity_df = sisal_dict['composite_entity']
+    original_chrono_df = sisal_dict['original_chronology']
+    sisal_chrono_df = sisal_dict['sisal_chronology']
+    
     #############################
     # 1) Remove superseded entities and their samples
     entity_df1 = entity_df.loc[entity_df['entity_status']!='superseded']
@@ -160,28 +158,27 @@ def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
     unique_min_sample_df = sample_df1[sample_df1["entity_id"].isin(unique_entities[unique_entities == 1].index)]
     sample_df2 = unique_min_sample_df[unique_min_sample_df["mineralogy"].isin(['calcite', 'aragonite'])]
     #############################
-    # 3) Keep only samples associated with a ( 4. positive) chronology age
-    # print(chronology_df.loc[(chronology_df["sample_id"].isin(sample_df2["sample_id"]) ) 
-    #                            & ~( pd.isna(chronology_df[chrono])) &  (chronology_df[chrono]<=-75),
-    #                            chrono])
-    chrono_df1 = chronology_df[   (chronology_df["sample_id"].isin(sample_df2["sample_id"]) ) 
-                               & ~( pd.isna(chronology_df[chrono]))
-                               &  (chronology_df[chrono]>=0)
-                               ]
-    sample_df3 = sample_df2[sample_df2["sample_id"].isin(chrono_df1["sample_id"])]
+    # 3) Set age of samples either with original chronology or sisal chronology 
+    sample_df3 = set_samples_age_and_uncert(sample_df=sample_df2,
+                                            original_chronology_df=original_chrono_df,
+                                            sisal_chronology_df=sisal_chrono_df)
     #############################
     # 5) Keep only samples existing in d18O_df and having a non nan measurement
     d18O_df1 = d18O_df.dropna(subset='d18O_measurement')
     sample_df4 = sample_df3[(sample_df3["sample_id"].isin(d18O_df1["sample_id"]))]
 
+    ##############################
+    # 6) Remove composite entities
+    entity_df2 = entity_df1[~ entity_df1['entity_id'].isin(composite_entity_df['composite_entity_id'])]
+    sample_df5 = sample_df4[sample_df4['entity_id'].isin(entity_df2['entity_id'])]
 
-    final_entity_df = entity_df[entity_df["entity_id"].isin(sample_df4["entity_id"])]
-    final_chrono_df = chronology_df[chronology_df["sample_id"].isin(sample_df4["sample_id"])]
-    final_d18O_df = d18O_df[d18O_df["sample_id"].isin(sample_df4["sample_id"])]
+    ##############################
+    # Final, clean, concording, dataframes
+    final_entity_df = entity_df2[entity_df2["entity_id"].isin(sample_df5["entity_id"])]
+    final_d18O_df = d18O_df[d18O_df["sample_id"].isin(sample_df5["sample_id"])]
     final_site_df = site_df[site_df["site_id"].isin(final_entity_df["site_id"])]
     
-    return {ckey : final_chrono_df,
-            'sample': sample_df4,
+    return {'sample': sample_df4,
             'entity': final_entity_df,
             'd18O': final_d18O_df,
             'site': final_site_df,
@@ -190,12 +187,10 @@ def clean_sisal_data(sisal_dict: dict, chrono : str ='lin_interp_age') -> dict :
 def merge_sisal_df_with_columns(site_df   : DataFrame,
                                 entity_df : DataFrame,
                                 sample_df : DataFrame,
-                                chrono_df : DataFrame,
                                 d18O_df   : DataFrame,
                                 col_entity: list,
                                 col_site  : list,
                                 col_sample: list,
-                                col_chrono: list,
                                 col_d18O  : list)-> DataFrame :
     ''' This function merges the SISAL dataframes site_df, entity_df, sample_df, chrono_df and d18O_df into a single DataFrame, 
     keeping only the columns specified in lists col_entity, col_site, etc, from each dataframe.
@@ -205,7 +200,6 @@ def merge_sisal_df_with_columns(site_df   : DataFrame,
         - site_df   : DataFrame of the sisal database containing sites info
         - entity_df : DataFrame of the sisal database containing entities info
         - sample_df : DataFrame of the sisal database containing samples info
-        - chrono_df : DataFrame of the sisal database containing chronology info. Can be the df of sisal_chronology or original_chronology.
         - d18O_df   : DataFrame of the sisal database containing d18O info.
     Outputs :
         - merged_df : DataFrame containing the columns specified in list arguments and the columns of indices "sample_id","entity_id" and "site_id".
@@ -213,12 +207,12 @@ def merge_sisal_df_with_columns(site_df   : DataFrame,
 
     entities1 = entity_df[ col_entity+["site_id","entity_id"]].merge(site_df[ col_site+["site_id"] ],on="site_id",how='left')
     sample1 = sample_df[ col_sample+["entity_id","sample_id"] ].merge(entities1, on="entity_id",how='left')
-    sample2 = sample1.merge(chrono_df[ col_chrono+["sample_id"] ], on="sample_id",how='left')
-    merged_df = sample2.merge(d18O_df[ col_d18O+["sample_id"] ], on="sample_id", how='left')
+    # sample2 = sample1.merge(chrono_df[ col_chrono+["sample_id"] ], on="sample_id",how='left')
+    merged_df = sample1.merge(d18O_df[ col_d18O+["sample_id"] ], on="sample_id", how='left')
 
     return merged_df
 
-def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
+def get_basic_cleaned_merged_sisal_data()-> DataFrame:
     ''' Loads the SISAL database, apply basic cleaning (see documentation of function clean_sisal_data above),
     and merges the different tables of the database into one dataframe 
     (keeping only the commonly needed columns TODO:add flexibilizy in columns choice)
@@ -229,38 +223,101 @@ def get_basic_cleaned_merged_sisal_data(chrono : str ='interp_age')-> DataFrame:
 
     # Clean the data
     print('   cleaning samples')
-    if chrono == 'interp_age':
-        chronology_df_ref = 'original_chronology'
-    else : 
-        chronology_df_ref = 'sisal_chronology'
-    clean_dict = clean_sisal_data(sisal_dict,chrono=chrono)
+    clean_dict = clean_sisal_data(sisal_dict)
     site_df_clean = clean_dict['site']
     entity_df_clean = clean_dict['entity']
     d18O_df_clean = clean_dict['d18O']
     sample_df_clean = clean_dict['sample']
-    chrono_df_clean = clean_dict[chronology_df_ref]
 
     # Merge in one df
     col_site = ['site_name','longitude','latitude']
     col_entity = []
-    col_chrono = [chrono]
-    col_sample = ["mineralogy"]
+    col_sample = ["mineralogy","age","age_method","age_uncert_pos","age_uncert_neg"]
     col_d18O = ['d18O_measurement','d18O_precision']
 
     merged_data = merge_sisal_df_with_columns(
         site_df= site_df_clean,
         entity_df  = entity_df_clean,
         sample_df  = sample_df_clean,
-        chrono_df  = chrono_df_clean,
         d18O_df    = d18O_df_clean,
         col_entity = col_entity,
-        col_chrono = col_chrono,
         col_d18O   = col_d18O,
         col_site   = col_site,
         col_sample = col_sample
         )
     print('loading and cleaning done.')
     return merged_data
+
+def set_samples_age_and_uncert(sample_df : pd.DataFrame,
+                               original_chronology_df : pd.DataFrame,
+                               sisal_chronology_df: pd.DataFrame):
+    # put all ages in the samples dataframe
+    sample_df_interp_age  = pd.merge(sample_df,original_chronology_df[['sample_id','interp_age','interp_age_uncert_pos','interp_age_uncert_neg']],how='left')
+    age_models = ['lin_interp_age','lin_reg_age','Bchron_age','Bacon_age','OxCal_age','copRa_age','StalAge_age']
+    cols = age_models + [c+'_uncert_pos' for c in age_models] + [c+'_uncert_neg' for c in age_models] + ['sample_id']
+    out_df = pd.merge(sample_df_interp_age,sisal_chronology_df[cols],how='left')
+
+    # set the age value to the interp_age value, if it exists
+    out_df['age']=np.nan
+    out_df['age_uncert_pos']=np.nan
+    out_df['age_uncert_neg']=np.nan
+    out_df['age_method'] = ''
+    out_df.loc[~out_df['interp_age'].isna(),'age']=out_df['interp_age']
+    out_df.loc[~out_df['interp_age'].isna(),'age_method']='interp_age'
+    out_df.loc[~out_df['interp_age'].isna(),'age_uncert_neg']=out_df['interp_age_uncert_neg']
+    out_df.loc[~out_df['interp_age'].isna(),'age_uncert_pos']=out_df['interp_age_uncert_pos']
+
+    # for samples with no interp_age, see which methods are available
+    for method in age_models : 
+        out_df.loc[(out_df['interp_age'].isna())&(~out_df[method].isna()),'age_method']+= method #type:ignore
+    # Sometimes it is easy : only one age model is available :
+    for method in age_models :
+        out_df.loc[out_df['age_method']==method,'age'] = out_df[method]
+        out_df.loc[out_df['age_method']==method,'age_uncert_pos'] = out_df[f"{method}_uncert_pos"]
+        out_df.loc[out_df['age_method']==method,'age_uncert_neg'] = out_df[f"{method}_uncert_neg"]
+
+    # .. but when we have multiple age models choices : we do not prefer one age model to another, so we can aggregate the models with inverse variance weighted mean
+    mask_mult_methods = ~((out_df['age_method'].isin(cols))|(out_df['age_method']=='interp_age'))
+    list_multiple_methods = out_df.loc[mask_mult_methods,'age_method'].unique()    
+
+    for l in list_multiple_methods :
+        # get the list of methods from the long string
+        ms = [m + '_age' for m in l.split('_age')]
+        ms.pop()
+        mask_l_method = out_df['age_method']==l # mask = selects rows with methods ms (l)
+        df_l = out_df[mask_l_method].copy() # df of rows sharing same methods ms (l)
+        # compute weighted mean
+        for m in ms : # for each method m among methods ms (l)
+            # prepare columns w, sigma
+            df_l[f'{m}_w']=np.nan
+            df_l[f'{m}_sigma']=np.nan
+            up  = df_l[f"{m}_uncert_pos"]
+            un  = df_l[f"{m}_uncert_neg"]
+            # compute sigma
+            nan_mask = ~up.isna() & ~un.isna()
+            df_l.loc[nan_mask,f'{m}_sigma'] =  (up[nan_mask] + un[nan_mask]) / 2.0
+            # compute w : 
+            nonzero_mask = df_l[f'{m}_sigma']!=0
+            df_l.loc[nan_mask & nonzero_mask,f'{m}_w'] = w = 1.0 / (df_l.loc[nan_mask & nonzero_mask,f'{m}_sigma']**2)
+            # df_l.loc[(~nan_mask)|(~nonzero_mask),f'{m}_w'] = np.nan   # CHOICE : nan weight if missing or 0 uncertainty : we do not want to use this value
+        
+        # Normalized weighted mean
+        ages = np.array(df_l[ms], float)
+        weights = np.array(df_l[[m+"_w" for m in ms]], float)
+
+        df_l['age'] = np.nansum(weights * ages,axis=1) / np.nansum(weights,axis=1)
+        # The uncertainty is the within uncertainety + methods disagreement variance
+        within_sigma2 = 1 / np.nansum(weights,axis=1) # combination of the methods uncertainties
+        between_sigma2 = np.nanvar(ages, axis=1) # uncertainty due to the disagreement of methods
+        df_l['age_uncert_pos'] = np.sqrt(within_sigma2 + between_sigma2)
+        df_l['age_uncert_neg'] = df_l['age_uncert_pos']
+
+        # put the ages and uncert. in the out_df columns
+        out_df.loc[mask_l_method,'age'] = df_l['age']
+        out_df.loc[mask_l_method,'age_uncert_neg'] = df_l['age_uncert_neg']
+        out_df.loc[mask_l_method,'age_uncert_pos'] = df_l['age_uncert_pos']
+        
+    return out_df
 
 def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
     ''' This functions converts calcite d18O (V-PDB standards) values to their drip water equivalent (V-SMOW standard), 
@@ -295,13 +352,12 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
         # print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
-def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chrono : str , method : str = 'linear') -> DataFrame :
+def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, method : str = 'linear') -> DataFrame :
     ''' Retrieve the temperature of each sample of data_df by interpolating temp_xda values at data_df points using scipy RegularGridInterpolator
     Inputs :
         - data_df : DataFrame containing columns 'latitude', ' longitude', chrono. The chrono column should contain **positive** ages in yrs BP
         - temp_xda : DataArray containing a global temperature dataset with dimensions 'lat','lon','time'. 
                      Time is a **negative** age in yrs BP (i.e. -1000 stands for 1000 yrs BP).
-        - chrono : str of the name of the chronology column in data_df. 
         - method : str of the name of the method to use to interpolate the temperature data points. Supported : "linear", "nearest", "slinear", "cubic", "quintic" and "pchip".
     Output : 
         - data_df : with an exra column 'T_interp' containing the temperature associated to each sample row.
@@ -321,7 +377,7 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chr
     )
 
     # set up sample points for interpolation
-    sample_times = - data_df[chrono].values # type: ignore
+    sample_times = - data_df['age'].values # type: ignore
     sample_lats = data_df['latitude'].values
     sample_lons = data_df['longitude'].values
 
@@ -332,44 +388,7 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, chr
     
     return data_df
 
-# Deprecated : slower than RegularGridInterpolator, same results.
-# def retrieve_T_nearest_neighbour(data_df : DataFrame, chrono : str, temp_xda : DataArray) -> DataFrame:
-#     ''' This function aims to retrieve the surface temperature associated to each sample of the dataframe in input, 
-#     using the global temperature dataset provided in input, by attributing the temperature value at the nearest point
-#     (lon,lat,time) in this temperature dataset. 
-#     Inputs :
-#         - chrono : str representing a chronology method (e.g. lin_interp_age...) 
-#         - data_df : DataFrame of data, including columns 'longitude', 'latitude' and chrono
-#         - temp_xda : Xarray dataset providing temperature on a global grid with 'lat' and 'lon' coordinates. 
-#     Output : 
-#         - data_df : DataFrame of the data with an extra column T representing the surface temperature.
-#     '''
-#     print('-> retrieving temperatures using NN (takes a while...)')
-#     # temp_xda.sel(lon=xr.DataArray(dataT['longitude'], dims="samples"),
-#     #              lat=xr.DataArray(dataT['latitude'] , dims="samples"),
-#     #              method='nearest',
-#     #          ).values
-#     # This one-liner produced OOM errors,
-#     # and this method below was the slowest :
-#     # dataT['T'] = [
-#     #     temp_xda.sel(
-#     #         lat=lat,
-#     #         lon=lon,
-#     #         time=-float(age),
-#     #         method='nearest'
-#     #     ).values.item()
-#     #     for lat, lon, age in zip(dataT['latitude'], dataT['longitude'], dataT[chrono])
-#     # ]
-#     # so we prefer to apply this computation :
-#     data_df['T'] = data_df.apply(lambda row : float(temp_xda.sel(lat = row['latitude'],
-#                                                        lon = row['longitude'],
-#                                                        time = -float(row[chrono]),
-#                                                        method = 'nearest'
-#                                                        )),axis=1)
-#     print('temp NN retrieval done.')
-#     return data_df
-
-def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, chrono : str, temp_xda : DataArray, method : str = 'linear')-> DataFrame :
+def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_xda : DataArray, method : str = 'linear')-> DataFrame :
     ''' 1) retrieves temperature of data_df samples based on the temp_xda datarray provided (interpolation with specified method + NN as backup) 
         2) convert speleothem PDB d18O into precipitation VSMOW d18O using Tremaine equation.
     Inputs :  TODO
@@ -377,7 +396,7 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, chrono
     '''
     print("-> converting speleothem data")
     # 1. Temperature retrieval 
-    data_to_convert = retrieve_T_RegularGridInterp(data_df = data_df,temp_xda = temp_xda, chrono = chrono, method = 'linear')
+    data_to_convert = retrieve_T_RegularGridInterp(data_df = data_df,temp_xda = temp_xda, method = 'linear')
     #    Mask locs and times for which this method failed
     mask_nan = data_to_convert['T_linear'].isna()
     #    Apply the NN method for these points, if any
@@ -386,7 +405,6 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, chrono
         data_to_convert['T_nearest'] = pd.NA
         data_to_convert.loc[mask_nan,'T_nearest'] = retrieve_T_RegularGridInterp(data_df=data_df[mask_nan].copy(),
                                                                                  temp_xda=temp_xda,
-                                                                                 chrono=chrono,
                                                                                  method='nearest')['T_nearest']
     #    Gather T in a T column
     data_to_convert.loc[ mask_nan,'T'] = data_to_convert.loc[mask_nan,'T_nearest']
@@ -423,76 +441,3 @@ def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame) -> pd.DataFrame :
     # print('-> Continents found in the site df :',continents)
     return df
 
-########################################################################################### PLOTTING
-def plot_global_map(data:DataFrame,
-                    title:str,
-                    quantity_col:str='d18O_measurement',
-                    quantity:str='d18O',
-                    unit:str='‰ VPDB',
-                    proj:bool=True)-> Figure:
-    ''' 3D or flat earth (natural earth proj)
-    If proj=True : 2D 
-    else : 3D
-    '''
-    fig = go.Figure()
-    fig.add_trace(go.Scattergeo(
-        lon=data["longitude"],
-        lat=data["latitude"],
-        text=data[quantity_col],
-        mode="markers",
-        marker=dict(
-            symbol="square",
-            size=10,
-            color=data[quantity_col],
-            colorscale="icefire",   # modern colormap
-            # cmin=-15.5,
-            # cmax=0,
-            opacity=0.7,
-            line=dict(color="white", width=1),
-            colorbar=dict(
-                title=f"{quantity}({unit})",
-                ticks="outside",
-                ticklen=6,
-                thickness=15
-            )
-        )
-    ))
-    if proj :
-        fig.update_layout(
-            geo=dict(
-                projection=dict(type="natural earth"),
-                showland=True,
-                landcolor="#fffafa",
-                showocean=True,
-                oceancolor="#83d0f1",
-                showcountries=True,
-                showcoastlines=True,
-                showframe=False,
-                fitbounds="locations"
-            )
-        )
-    else :
-        fig.update_layout(
-            geo=dict(
-                projection=dict(type="orthographic", rotation=dict(lat=12, lon=0)),
-                showland=True,
-                landcolor="#f0f0f0",
-                showocean=True,
-                oceancolor="#def4fd",
-                showcountries=True,
-                showcoastlines=False,
-                showframe=False
-            )
-        )
-        # fig.write_html("../output/mean_values_d18O_interactive_map_sisal.html", include_plotlyjs="cdn")
-    fig.update_layout(
-        title=dict(
-                text=title,
-                x=0.5,
-                xanchor="center",
-                font=dict(size=20, family="Arial, sans-serif")
-            ),
-            margin=dict(r=20, l=20, t=50, b=20),
-            template="plotly_white"
-    )
-    return fig
