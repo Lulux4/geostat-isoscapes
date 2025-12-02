@@ -6,6 +6,8 @@ from matplotlib.axes import Axes
 import xarray as xr
 import numpy as np
 from . import utils, geostat_utils as gutils
+import pandas as pd
+import plotly.graph_objects as go
 
 def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
@@ -149,7 +151,8 @@ def plot_variogram_from_bins_and_gamma(centers,
     # Overlay model if wanted and given
     if (plot_model) and (model_name is not None) and (model_fct is not None):
         h = np.arange(0,centers.max(),10000)
-        ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{model_name} fit')
+        legend_model = model_name if model_name!='composite' else 'spherical+gaussian'
+        ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{legend_model} fit')
         sill,range_,nugget= None,None,None
         
         if (model_name != 'composite') and (model_params is not None) :
@@ -242,3 +245,77 @@ def plot_dist_to_coast_map(df,countries_borders: bool = False) -> tuple[Figure, 
         ax.add_feature(country_borders, edgecolor='gray') #type:ignore
     ax.coastlines() # type:ignore
     return fig, ax
+
+
+def plot_global_map(data:pd.DataFrame,
+                    title:str,
+                    quantity_col:str='d18O_measurement',
+                    quantity:str='d18O',
+                    unit:str='‰ VPDB',
+                    proj:bool=True)-> go.Figure:
+    ''' 3D or flat earth (natural earth proj)
+    If proj=True : 2D 
+    else : 3D
+    '''
+    fig = go.Figure()
+    fig.add_trace(go.Scattergeo(
+        lon=data["longitude"],
+        lat=data["latitude"],
+        text=data[quantity_col],
+        mode="markers",
+        marker=dict(
+            symbol="square",
+            size=10,
+            color=data[quantity_col],
+            colorscale='plasma',
+            # cmin=-15.5,
+            # cmax=0,
+            opacity=0.7,
+            line=dict(color="white", width=1),
+            colorbar=dict(
+                title=f"{quantity}({unit})",
+                ticks="outside",
+                ticklen=6,
+                thickness=15
+            )
+        )
+    ))
+    if proj :
+        fig.update_layout(
+            geo=dict(
+                projection=dict(type="natural earth"),
+                showland=True,
+                landcolor="#fffafa",
+                showocean=True,
+                oceancolor="#83d0f1",
+                showcountries=True,
+                showcoastlines=True,
+                showframe=False,
+                fitbounds="locations"
+            )
+        )
+    else :
+        fig.update_layout(
+            geo=dict(
+                projection=dict(type="orthographic", rotation=dict(lat=12, lon=0)),
+                showland=True,
+                landcolor="#f0f0f0",
+                showocean=True,
+                oceancolor="#def4fd",
+                showcountries=True,
+                showcoastlines=False,
+                showframe=False
+            )
+        )
+        # fig.write_html("../output/mean_values_d18O_interactive_map_sisal.html", include_plotlyjs="cdn")
+    fig.update_layout(
+        title=dict(
+                text=title,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=20, family="Arial, sans-serif")
+            ),
+            margin=dict(r=20, l=20, t=50, b=20),
+            template="plotly_white"
+    )
+    return fig
