@@ -49,7 +49,7 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
 
 def plot_isoscape_latlon_platecarree_df(
         df,
-        time: str,
+        time: str = '',
         title: str = "Values of d18O",
         countries_borders: bool = False
     ):
@@ -173,7 +173,7 @@ def plot_variogram_from_bins_and_gamma(centers,
             if counts is not None : 
                 weights = gutils.get_weights_from_pair_counts(counts)
             r2 = utils.compute_r2(gamma, model_fct(centers), weights=weights)
-            textstr = f"Range: {range_:.1e} m\nSill: {sill:.2f} ‰\nNugget: {nugget:.2f} ‰\nR²: {r2:.2f}"
+            textstr = f"Range: {range_:.1e} m\nSill: {sill:.2f} ‰²\nNugget: {nugget:.2f} ‰²\nR²: {r2:.2f}"
             ax.text(0.835, 0.22, textstr,
                     transform=ax.transAxes,
                     fontsize=10,
@@ -199,7 +199,7 @@ def plot_variogram_from_bins_and_gamma(centers,
     ax.set_ylim(bottom=0)
     ax.grid(True, alpha=0.4)
     ax.set_xlabel("Lag distance [m]")
-    ax.set_ylabel("Semivariance")
+    ax.set_ylabel("Semivariance [‰²]")
     
     if ax_ is None :
         plt.title(f"Empirical variogram - {time}")
@@ -252,7 +252,8 @@ def plot_global_map(data:pd.DataFrame,
                     quantity_col:str='d18O_measurement',
                     quantity:str='d18O',
                     unit:str='‰ VPDB',
-                    proj:bool=True)-> go.Figure:
+                    proj:bool=True,
+                    symbol : str ='square')-> go.Figure:
     ''' 3D or flat earth (natural earth proj)
     If proj=True : 2D 
     else : 3D
@@ -264,7 +265,7 @@ def plot_global_map(data:pd.DataFrame,
         text=data[quantity_col],
         mode="markers",
         marker=dict(
-            symbol="square",
+            symbol=symbol,
             size=10,
             color=data[quantity_col],
             colorscale='plasma',

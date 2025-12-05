@@ -212,17 +212,17 @@ def merge_sisal_df_with_columns(site_df   : DataFrame,
 
     return merged_df
 
-def get_basic_cleaned_merged_sisal_data()-> DataFrame:
+def get_basic_cleaned_merged_sisal_data(verbose=True)-> DataFrame:
     ''' Loads the SISAL database, apply basic cleaning (see documentation of function clean_sisal_data above),
     and merges the different tables of the database into one dataframe 
     (keeping only the commonly needed columns TODO:add flexibilizy in columns choice)
     '''
     # Load SISAL data
-    print('-> loading database')
+    if verbose : print('-> loading SISAL database')
     sisal_dict = load_sisal()
 
     # Clean the data
-    print('   cleaning samples')
+    if verbose : print('   cleaning samples')
     clean_dict = clean_sisal_data(sisal_dict)
     site_df_clean = clean_dict['site']
     entity_df_clean = clean_dict['entity']
@@ -245,7 +245,7 @@ def get_basic_cleaned_merged_sisal_data()-> DataFrame:
         col_site   = col_site,
         col_sample = col_sample
         )
-    print('loading and cleaning done.')
+    if verbose : print('loading and cleaning done.')
     return merged_data
 
 def set_samples_age_and_uncert(sample_df : pd.DataFrame,
@@ -332,7 +332,8 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
                       'aragonite':[18.34,31.954]
                       }
     converted_data = calcite_df.copy()
-    converted_data['d18Op_VSMOW'] = np.nan
+    converted_data['d18Op_VSMOW_exactconv'] = np.nan
+    converted_data['d18Op_VSMOW_linearized'] = np.nan
 
     for mineralogy in ['calcite','aragonite']:
         mask = converted_data["mineralogy"]==mineralogy
@@ -388,20 +389,20 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, met
     
     return data_df
 
-def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_xda : DataArray, method : str = 'linear')-> DataFrame :
+def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_xda : DataArray, method : str = 'linear', verbose: bool = True)-> DataFrame :
     ''' 1) retrieves temperature of data_df samples based on the temp_xda datarray provided (interpolation with specified method + NN as backup) 
         2) convert speleothem PDB d18O into precipitation VSMOW d18O using Tremaine equation.
     Inputs :  TODO
     Outputs : TODO
     '''
-    print("-> converting speleothem data")
+    if verbose : print("-> converting speleothem data")
     # 1. Temperature retrieval 
     data_to_convert = retrieve_T_RegularGridInterp(data_df = data_df,temp_xda = temp_xda, method = 'linear')
     #    Mask locs and times for which this method failed
     mask_nan = data_to_convert['T_linear'].isna()
     #    Apply the NN method for these points, if any
     if mask_nan.sum() :
-        print(f'   {method} interpolation failed for {mask_nan.sum()} samples, trying to fill missing T with nearest neighbour method')
+        if verbose : print(f'   {method} interpolation failed for {mask_nan.sum()} samples, trying to fill missing T with nearest neighbour method')
         data_to_convert['T_nearest'] = pd.NA
         data_to_convert.loc[mask_nan,'T_nearest'] = retrieve_T_RegularGridInterp(data_df=data_df[mask_nan].copy(),
                                                                                  temp_xda=temp_xda,
@@ -410,12 +411,12 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_x
     data_to_convert.loc[ mask_nan,'T'] = data_to_convert.loc[mask_nan,'T_nearest']
     data_to_convert.loc[~mask_nan,'T'] = data_to_convert.loc[~mask_nan,'T_linear']
     mask_nans_final = data_to_convert['T'].isna()
-    print(f'   after {method} interpolation and nearest neighbour backup, still no temperature for', mask_nans_final.sum(),'samples.')
-    print("   temperature retrieval finished, starting conversion")
+    if verbose : print(f'   after {method} interpolation and nearest neighbour backup, still no temperature for', mask_nans_final.sum(),'samples.')
+    if verbose : print("   temperature retrieval finished, starting conversion")
     
     # 2. Conversion 
     converted_data = convert_calcite_to_drip_water(data_to_convert)
-    print("conversion done.")
+    if verbose : print("conversion done.")
 
     return converted_data
 
