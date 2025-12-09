@@ -4,9 +4,10 @@ import geopandas as gpd
 import numpy as np 
 import shapely 
 from pyproj import CRS
+from scipy.spatial.distance import cdist
 
 # =========================================================================================
-# MISC.TOOLS FOR DATA LOADING, BINNING, MASKING
+# MISC.TOOLS FOR DATA LOADING, BINNING
 # =========================================================================================
 def load_xarray_datarray(fn: str) -> xr.Dataset:
     """ Just a function to open a netcdf dataset """
@@ -40,6 +41,10 @@ def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray :
 def get_yrBP_from_itrace_time(days_after_start : int, start_year : int = 11700)->float:
     """ TODO"""
     return start_year + days_after_start / 365.0
+
+# =============================================================================================
+# "Spatial" computations
+# =============================================================================================
 
 def mask_country_shape(da : xr.DataArray | pd.DataFrame, 
                        country_names: list[str] = ["China"], 
@@ -112,6 +117,65 @@ def convert_lat_0_180_to_neg90_90(lat:np.ndarray) ->np.ndarray:
     """ Converts latitudes in the interval 0 to 180 degreees to -90 to 90 degrees"""
     return (lat + 90) % 180 -90
 
+def haversine(u, v):
+    """Haversine distance (km) between two (lat,lon) points."""
+    lat1, lon1 = np.radians(u)
+    lat2, lon2 = np.radians(v)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    return 2 * 6371 * np.arcsin(np.sqrt(a)) # since earth radius = approx 6371 km
+
+
+def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | xr.DataArray,
+                                     df_ref_pts : pd.DataFrame, 
+                                     radius_km : int,
+                                     lat_name="lat", 
+                                     lon_name="lon",):
+    """ Masks points in dataframe or xarray dataset, keeping only the union of circles centered on df_ref_pts points, with a radius radius_km. 
+    """
+
+    # get the list of (unique) ref points locations 
+    unique_locs = df_ref_pts[[lat_name,lon_name]].drop_duplicates()
+    ref_locs = unique_locs.values
+    # ===============
+    # pandas version
+    # ===============
+    if isinstance(data_to_mask,pd.DataFrame):
+        # data points of the df to mask
+        locs_to_mask = data_to_mask[[lat_name,lon_name]].drop_duplicates().reset_index(drop=True)
+        # Compute min distance from each point to nearest ref point
+        distances = cdist(locs_to_mask[[lat_name,lon_name]].values, ref_locs, metric=haversine)  # shape (n_unique_to_mask, n_ref_pts)
+        # Mask df
+        locs_to_mask['mask'] = distances.min(axis=1)  <= radius_km
+
+        return apply_spatial_mask(data_to_mask,locs_to_mask,lat_name,lon_name,'mask'), locs_to_mask
+    # ===============
+    # xr version 
+    # ===============
+    elif isinstance(data_to_mask,xr.Dataset):
+        # points to mask (extraction)
+        lats = data_to_mask[lat_name].values
+        lons = data_to_mask[lon_name].values
+        lon2d, lat2d = np.meshgrid(lons,lats)
+        locs = np.column_stack([lat2d.ravel(), lon2d.ravel()])  # (nlat*nlon, 2)
+        # compute dist
+        distances = cdist(locs, ref_locs, metric=haversine)  # (npts, Nref)
+        min_dist = distances.min(axis=1).reshape(lat2d.shape)  # reshape to (lat,lon)
+        # mask
+        mask2d = min_dist <= radius_km    # (lat, lon)
+        mask = xr.DataArray(mask2d,
+                            dims=(lat_name, lon_name),
+                            coords={lat_name: data_to_mask[lat_name], lon_name: data_to_mask[lon_name]},
+                        ).expand_dims(time=data_to_mask.time)
+        
+        return data_to_mask.where(mask), mask
+
+
+def apply_spatial_mask(df, spatial_mask, lat='lat', lon='lon',mask_col='mask'):
+    """ Applies a mask defined on specific lat lon coordinates to a dataframe """
+    merged = df.merge(spatial_mask, on=[lat, lon], how="left")    
+    return merged[merged[mask_col]]
 # =========================================================================================
 # STATISTICAL METRICS
 # =========================================================================================

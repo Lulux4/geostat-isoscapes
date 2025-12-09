@@ -353,7 +353,14 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
         # print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
-def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, method : str = 'linear') -> DataFrame :
+def retrieve_T_RegularGridInterp( data_df : DataFrame, 
+                                 temp_xda : DataArray, 
+                                 method : str = 'linear',
+                                 data_lon_col='longitude',
+                                 data_lat_col='latitude',
+                                 temp_lon_col='lon',
+                                 temp_lat_col='lat'
+                                 ) -> DataFrame :
     ''' Retrieve the temperature of each sample of data_df by interpolating temp_xda values at data_df points using scipy RegularGridInterpolator
     Inputs :
         - data_df : DataFrame containing columns 'latitude', ' longitude', chrono. The chrono column should contain **positive** ages in yrs BP
@@ -364,8 +371,8 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, met
         - data_df : with an exra column 'T_interp' containing the temperature associated to each sample row.
     '''
     # set up the interpolator
-    temp_lats  = temp_xda['lat'].values.copy()
-    temp_lon   = temp_xda['lon'].values.copy()
+    temp_lats  = temp_xda[temp_lat_col].values.copy()
+    temp_lon   = temp_xda[temp_lon_col].values.copy()
     temp_times = temp_xda['time'].values.copy()
     temp_values = temp_xda.values
 
@@ -379,8 +386,8 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame, temp_xda : DataArray, met
 
     # set up sample points for interpolation
     sample_times = - data_df['age'].values # type: ignore
-    sample_lats = data_df['latitude'].values
-    sample_lons = data_df['longitude'].values
+    sample_lats = data_df[data_lat_col].values
+    sample_lons = data_df[data_lon_col].values
 
     points = np.column_stack([sample_times, sample_lats, sample_lons]) # type: ignore
 
@@ -420,23 +427,23 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_x
 
     return converted_data
 
-def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame) -> pd.DataFrame :
+def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame,lat_col :str ='latitude',lon_col :str ='longitude') -> pd.DataFrame :
     ''' TODO : explain this rough def of continents
     '''
     df = df_orig.copy()
     # Define regions
     df['continent'] = ''
     #middle east apart form africa :
-    df.loc[(df['latitude']>= -35)&(df['latitude']<= 37)&(df['longitude']>= -20)&(df['longitude']<= 52),'continent']='Africa'
-    df.loc[(df['latitude']<= -60),'continent']='Antarctica'
-    df.loc[(df['latitude']>= 5)&(df['latitude']<= 81)&(df['longitude']>= 26)&(df['longitude']<= 180),'continent']='Asia'
-    df.loc[(df['latitude']>= 35)&(df['latitude']<= 72)&(df['longitude']>= -25)&(df['longitude']<= 50),'continent']='Europe'
-    df.loc[(df['latitude']>= 5)&(df['latitude']<= 83)&((df['longitude']>= -170)&(df['longitude']<= -50)),'continent']='North America'
-    df.loc[(df['latitude']>= -50)&(df['latitude']<= 0)&((df['longitude']>= 110)|(df['longitude']<= 180)),'continent']='Oceania'
-    df.loc[(df['latitude']>= -60)&(df['latitude']<= 15)&(df['longitude']>= -90)&(df['longitude']<= -30),'continent']='South America'
-    df.loc[(df['continent']=='') & (df['latitude']>= 0) & (df['latitude']<= 15) & (df['longitude']>= 110) & (df['longitude']<= 120),'continent']='Indonesia' # Indonesie, transcontinental
-    df.loc[(df['continent']=='') & (df['latitude']>= 75) & (df['latitude']<= 85) & (df['longitude']>= -30) & (df['longitude']<= -15),'continent']='North America' # Greenland is on North America plate
-    df.loc[(df['latitude']>= 12)&(df['latitude']<= 42)&(df['longitude']>= 32)&(df['longitude']<= 60),'continent']='Middle East' # Middle East
+    df.loc[(df[lat_col]>= -35)&(df[lat_col]<= 37)&(df[lon_col]>= -20)&(df[lon_col]<= 52),'continent']='Africa'
+    df.loc[(df[lat_col]<= -60),'continent']='Antarctica'
+    df.loc[(df[lat_col]>= 5)&(df[lat_col]<= 81)&(df[lon_col]>= 26)&(df[lon_col]<= 180),'continent']='Asia'
+    df.loc[(df[lat_col]>= 35)&(df[lat_col]<= 72)&(df[lon_col]>= -25)&(df[lon_col]<= 50),'continent']='Europe'
+    df.loc[(df[lat_col]>= 5)&(df[lat_col]<= 83)&((df[lon_col]>= -170)&(df[lon_col]<= -50)),'continent']='North America'
+    df.loc[(df[lat_col]>= -50)&(df[lat_col]<= 0)&((df[lon_col]>= 110)|(df[lon_col]<= 180)),'continent']='Oceania'
+    df.loc[(df[lat_col]>= -60)&(df[lat_col]<= 15)&(df[lon_col]>= -90)&(df[lon_col]<= -30),'continent']='South America'
+    df.loc[(df['continent']=='') & (df[lat_col]>= 0) & (df[lat_col]<= 15) & (df[lon_col]>= 110) & (df[lon_col]<= 120),'continent']='Indonesia' # Indonesie, transcontinental
+    df.loc[(df['continent']=='') & (df[lat_col]>= 75) & (df[lat_col]<= 85) & (df[lon_col]>= -30) & (df[lon_col]<= -15),'continent']='North America' # Greenland is on North America plate
+    df.loc[(df[lat_col]>= 12)&(df[lat_col]<= 42)&(df[lon_col]>= 32)&(df[lon_col]<= 60),'continent']='Middle East' # Middle East
 
     continents = df['continent'].unique()
     # print('-> Continents found in the site df :',continents)

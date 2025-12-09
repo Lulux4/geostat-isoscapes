@@ -10,7 +10,7 @@ import skgstat as skg
 from scipy.optimize import curve_fit
 from tqdm import tqdm 
 import pandas as pd
-from . import utils,sisal_utils
+from . import utils,sisal_utils,variogram_models
 from scipy.interpolate import RegularGridInterpolator
 from shapely.geometry import Point
 from shapely.ops import nearest_points
@@ -22,15 +22,15 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 # Coordinates projections 
 # ==========================================================
 
-def get_projected_coords_and_vals(data_array : xr.DataArray, time : str | float, epsg : str = "EPSG:3857"):    
+def get_projected_coords_and_vals(data_array : xr.DataArray, time : str | float, epsg : str = "EPSG:3857",lat='lat',lon='lon'):    
     ''' This function extracts a slice from a xarray DataArray at a given time,
     converts lat and lon coordinates to the chosen epsg projection, stack them to get an array of shape (n,2),
     and returns the stacked arrray as well as the flattened values associated to each point of the coordinates array.
     '''
     da_slice = data_array.sel(time=time)
-    stacked = da_slice.stack(point=('lat','lon')).dropna('point')
-    lons_s = stacked['lon'].values
-    lats_s = stacked['lat'].values
+    stacked = da_slice.stack(point=(lat,lon)).dropna('point')
+    lons_s = stacked[lon].values
+    lats_s = stacked[lat].values
     vals_s = stacked.values.astype(float)
 
     xs,ys = project_coords(lons_s,lats_s,epsg=epsg)
@@ -50,22 +50,22 @@ def project_coords(lons,lats,epsg="EPSG:3857"):
 
 def detrend_data_plane(coords, vals):
     ''' detrend data by fitting plane z ~ x + y via a linear regression and subtract it to vals.
-    Returns the residuals
+    Returns the residuals and the fitted plane
     '''
     lr = LinearRegression().fit(coords, vals)
     trend = lr.predict(coords)
     resid = vals - trend
-    return resid
+    return resid, lr.get_params()
 
 def detrend_multiple_linear_regression(df_to_detrend, 
-                        value_col="d18Op",
-                        spec: str = 'lat',
-                        lat_col : str| None = "lat",
-                        lon_col : str| None = "lon",
-                        ele_col : str| None = "elevation",
-                        D_col : str| None = "dist_to_coast_m",
-                        P_col :str | None = 'P',
-                        ):
+                                    value_col="d18Op",
+                                    features: str = 'lat',
+                                    lat_col : str| None = "lat",
+                                    lon_col : str| None = "lon",
+                                    ele_col : str| None = "ele",
+                                    D_col : str| None = "D",
+                                    P_col :str | None = 'P',
+                                    ):
     """
     Fit and remove a physically-based multiple linear trend:
     trend = X@a = b0 + b_lat*lat + b_lat2*lat^2 + b_elev*elev + b_dist*dist + b_lon*lon
@@ -81,26 +81,26 @@ def detrend_multiple_linear_regression(df_to_detrend,
     df = df_to_detrend.copy()
     # Build design matrix
     X_cols = []
-    if 'lat' in spec:
-        if 'lat_abs' in spec :
+    if 'lat' in features:
+        if 'lat_abs' in features :
             df['|lat|'] = np.abs(df[lat_col])
             X_cols.append('|lat|')
-        elif 'lat_quad' in spec :
+        elif 'lat_quad' in features :
             df['lat2'] = df[lat_col]**2
             X_cols.append('lat2')
             X_cols.append('lat')
-        elif 'lat_sqrt' in spec :
+        elif 'lat_sqrt' in features :
             df['sqrt|lat|'] = np.sqrt(np.abs(df[lat_col]))
             X_cols.append('sqrt|lat|')
         else :
             X_cols.append(lat_col)
-    if 'lon' in spec:
+    if 'lon' in features:
         X_cols.append(lon_col)
-    if 'ele' in spec:
+    if 'ele' in features:
         X_cols.append(ele_col)
-    if 'D' in spec:
+    if 'D' in features:
         X_cols.append(D_col)
-    if 'P' in spec:
+    if 'P' in features:
         X_cols.append(P_col)
     # Check that at least one predictor is included
     if len(X_cols)==0:
@@ -202,6 +202,39 @@ def multiple_linear_result_dict_to_df(result_dict):
         res_df = pd.merge(res_df,vif,on='name').merge(pr2,on='name')
     
     return res_df
+
+def trend_removal(trend: str | None,df : pd.DataFrame,quantity : str, verbose: bool = False,lat='lat',lon='lon'):
+    """ Fits and remove trend model according to the name of the model passed in argument. Also returns the results (coeffs and metrics) 
+    of the fit. """
+    if trend is None :
+        if verbose : print('Arg trend=None : returning raw values and empty dict as result')
+        return df[quantity],None
+    
+    elif trend=='plane':
+        # Remove trend by fitting a plane 
+        XY = np.column_stack((df['x'], df['y']))
+        vals, results = detrend_data_plane(XY,df[quantity].values)
+    
+    elif 'multiple_linear' in trend:
+        # Remove trend by fitting a multilinear trend based on possibly many predictors : latitude (by default), elevation...
+        df_detrended, results = detrend_multiple_linear_regression(df,
+                                                                value_col=quantity,
+                                                                lat_col = lat,
+                                                                lon_col = lon,
+                                                                ele_col = 'ele' if ('ele' in df.columns)&('ele' in trend) else None,
+                                                                D_col = 'D' if ('D' in df.columns)&('D' in trend) else None,
+                                                                P_col = 'P' if ('P' in df.columns)&('P' in trend) else None,
+                                                                features = trend
+                                                                )
+        vals = df_detrended['residual'].values
+        if verbose :
+            res_df = multiple_linear_result_dict_to_df(result_dict=results)
+            print(f"-> detrending with multiple linear regression, R2 is {results['r2']:.3f} detailed metrics are :\n",res_df)
+    else : 
+        raise ValueError(f'Trend model {trend} is not supported.')
+    
+    return vals,results
+
 # =========================================================
 # Useful functions for variogram computation 
 # =========================================================
@@ -259,8 +292,11 @@ def variogram_with_gstat(df,
                          model : str ='spherical',
                          return_Variogram_object : bool = False,
                          seed : int = 42,
-                         verbose : bool = True
-                         )-> skg.Variogram | tuple[np.ndarray,np.ndarray, np.ndarray, object] :
+                         verbose : bool = True,
+                         tolerance = 22.5,
+                         x= 'x',
+                         y= 'y'
+                         ) :
     """Compute experimental variogram with sampling.
     TODO : write this fct doc 
     """
@@ -270,30 +306,22 @@ def variogram_with_gstat(df,
         df = df.sample(sample_size, random_state=seed)
     
     vals = df[quantity].values
+
+    trend_results = None
     if trend is not None: 
-        if trend=='plane':
-            # Remove trend by fitting a plane 
-            XY = np.column_stack((df['x'], df['y']))
-            vals = detrend_data_plane(XY,df[quantity].values)
-        elif 'multiple_linear' in trend:
-            # Remove trend by fitting a multilinear trend based on possibly many predictors : latitude (by default), elevation...
-            df_detrended, results = detrend_multiple_linear_regression(df,
-                                                                    value_col=quantity,
-                                                                    lat_col = 'lat',
-                                                                    lon_col = 'lon',
-                                                                    ele_col = 'elevation' if ('elevation' in df.columns)&('ele' in trend) else None,
-                                                                    D_col = 'dist_coast_m' if ('dist_coast_m' in df.columns)&('D' in trend) else None,
-                                                                    P_col = 'P' if ('P' in df.columns)&('P' in trend) else None,
-                                                                    spec = trend)
-            vals = df_detrended['residual'].values
-            if verbose :
-                res_df = multiple_linear_result_dict_to_df(result_dict=results)
-                print(f"-> detrending with multiple linear regression, R2 is {results['r2']:.3f} detailed metrics are :\n",res_df)
-    # Compute the variogram 
+        vals, trend_results = trend_removal(trend,df,quantity,verbose)
+    
+    # Compute the variogram
+    # =================
+    # UNDIRECTIONAL
+    # ================= 
     if direction is None :
-        if centers is None :
+        # ==============
+        # maxlag & nlags
+        # ==============
+        if centers is None:
             V = skg.Variogram(
-                df[['x','y']].values,
+                df[[x,y]].values,
                 vals,
                 n_lags=nlags,
                 # normalize=True,
@@ -301,40 +329,52 @@ def variogram_with_gstat(df,
                 model=model,
                 use_nugget=True
             )
+        # ==============
+        # fixed bins
+        # ==============
         else :
             V = skg.Variogram(
-                df[['x','y']].values,
+                df[[x,y]].values,
                 vals,
                 # normalize=True,
                 bin_func = make_fixed_bin_func(centers), #type: ignore
                 model=model,
                 use_nugget=True
             )
+    # =================
+    # DIRECTIONAL
+    # =================
     else :
+        # ==============
+        # maxlag & nlags
+        # ==============
         if centers is None :
             V = skg.DirectionalVariogram(
-                    df[['x','y']].values,
+                    df[[x,y]].values,
                     vals,
                     n_lags=nlags,
                     maxlag=maxlag,
                     model=model,
                     use_nugget=True,
                     azimuth=direction, #type:ignore
-                    tolerance = 22.5 )
+                    tolerance = tolerance )
+        # ==============
+        # fixed bins
+        # ==============
         else : 
             V = skg.DirectionalVariogram(
-                    df[['x','y']].values,
+                    df[[x,y]].values,
                     vals,
                     bin_func = make_fixed_bin_func(centers), #type:ignore
                     model=model,
                     use_nugget=True,
                     azimuth=direction, #type:ignore
-                    tolerance = 22.5 )
+                    tolerance = tolerance )
         
     if return_Variogram_object:
-        return V
+        return V, trend_results
     else :
-        return V.bins, V.experimental, V.bin_count,V.fitted_model
+        return V.bins, V.experimental, V.bin_count,V.fitted_model, trend_results
     
 def make_fixed_bin_func(centers):
     ''' returns a function with returning the (given) centers and associated edges, no matter the args provided.
@@ -369,7 +409,8 @@ def get_vario_parameters_dict(parameters):
 # Iterative variogram computations
 # =========================================================================
 
-# def iterative_variogram_computations(df,ref_bins = None,direction=None,trend='plane',verbose=False):
+# ========= deprecated : iterative vario looping on df grouped by time. See below for new version 
+# def iterative_variogram_computations_df(df,ref_bins = None,direction=None,trend='plane',verbose=False):
 #     """ TODO 
 #     """
 #     df['x'], df['y'] = project_coords(df['lon'].values, df['lat'].values, epsg="EPSG:3857")
@@ -405,23 +446,40 @@ def get_vario_parameters_dict(parameters):
 #     print('finished loop') 
 #     return bin_counts, gammas, ref_bins
 
-def iterative_variogram_computations(ds,
-                                quantity="d18Op",
-                                ref_bins=None,
-                                direction=None,
-                                trend="plane",
-                                verbose=False):
+def iterative_variogram_computations(ds : xr.DataArray,
+                                    quantity="d18Op",
+                                    ref_bins=None,
+                                    direction=None,
+                                    tolerance=22.5,
+                                    trend="plane",
+                                    maxlag = None,
+                                    nlags = 20,
+                                    mask = None,
+                                    trend_before_masking = True,
+                                    lat = 'lat',
+                                    lon='lon',
+                                    verbose=False):
     """
     Vario computation looping over an xarray dataset.
 
     Inputs: 
         ds : xr.Dataset containing lon, lat, time, and the variable quantity
+        quantity : str, name of the column containing the data to study
+        ref_bins : array-like of float, fixed bins
+        direction : float, azimuth of the directional variogram in degrees (0=East of the coord plane)
+        trend : str, name of the trend model to fit and remove.
+        maxlag : str or float, max lag of the vario
+        nlags : int, number of lags of the vario
+        mask : xr datarray with lat lon and time dims, used to mask some locations or times.
+        trend_before_masking : bool, specifies if trend removal should be applied before masking (True) or after (False).
+        verbose: bool, sets the verbosity of the function
     """
-    print(ds.dims)
+    quantity_tmp = quantity
+    trend_tmp = trend
     xs, ys, lons, lats, exog_df = None,None,None,None,None
     bin_counts, gammas = [], []
 
-    for v in ["lon", "lat", quantity]:
+    for v in [lon, lat, quantity]:
         if v not in ds:
             raise ValueError(f"Dataset must contain a '{v}' variable.")
 
@@ -430,16 +488,15 @@ def iterative_variogram_computations(ds,
 
     for t, ds_t in tqdm(ds.groupby("time")):
         # Convert to DataFrame
-        df = ds_t[['lat','lon','d18Op','P']].to_dataframe().reset_index()
-        print(f'debug: df has shape {df.shape} and columns {df.columns}')
+        df = ds_t.to_dataframe().reset_index()
         
         # Convert lat lon ranges :
-        if any(df['lon']>180) & (lons is None):
-            lons = utils.convert_lon_0_360_to_neg180_180(np.array(df['lon']))
-        if any(df['lat']>90) & (lats is None):
-            lats= utils.convert_lat_0_180_to_neg90_90(np.array(df['lat']))
-        if any(df['lon']>180): df['lon']=lons
-        if any(df['lat']>90): df['lat']=lats
+        if any(df[lon]>180) & (lons is None):
+            lons = utils.convert_lon_0_360_to_neg180_180(np.array(df[lon]))
+        if any(df[lat]>90) & (lats is None):
+            lats= utils.convert_lat_0_180_to_neg90_90(np.array(df[lat]))
+        if any(df[lon]>180): df[lon]=lons
+        if any(df[lat]>90): df[lat]=lats
 
         # Skip if not enough data
         if df[quantity].notna().sum() < 30:
@@ -447,42 +504,76 @@ def iterative_variogram_computations(ds,
 
         # Compute projected coordinates
         if (xs is None)&(ys is None):
-            xs,ys = project_coords(df["lon"].values,df["lat"].values,epsg="EPSG:3857")
+            xs,ys = project_coords(df[lon].values,df[lat].values,epsg="EPSG:3857")
         df["x"]=xs
         df["y"]=ys
-        
+
         # Add exog variables
-        if exog_df is None :
-            exog_df = add_external_variables_to_lonlat_df(df,variables=['D','ele'])[['lat','lon','dist_coast_m','elevation']]
-        df  = df.merge(exog_df,on=['lat','lon'])
+        df_cols= list(df.columns)
+        if (trend is not None):
+            if (exog_df is None) :
+                if 'multiple_linear' in str(trend) :
+                    variables = trend.split('_') #type:ignore
+                    variables = [v for v in variables if v in ['ele','D']]
+                    cols_exog = variables.copy()
+                    cols_exog.extend([lat,lon])
+                    exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon)[cols_exog]
+
+            df = df.merge(exog_df,on=[lat,lon]) # type:ignore
+            df = df.dropna(axis=0) # removes locs where exog data was not available
         
-        df = df.dropna(subset=['d18Op','P','dist_coast_m','elevation'])
+        # If specified : fit and remove trend here instead of inside variogram_with_gstat
+        if (trend is not None) & (mask is not None) and (trend_before_masking) :
+            if verbose : print('   removing trend using all available locations.')
+            df['resid'],trend_results = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon)
+            quantity = 'resid'
+            trend = None
+        
+        # If specified : mask data with provided mask (eg mask itrace to keep only sisal pts neighborhoods)
+        if mask is not None :
+            # sanity check for the latlon format
+            if any(mask[lon]>180):
+                mask[lon] = utils.convert_lon_0_360_to_neg180_180(mask[lon])
+            if any(mask[lat]>90):
+                mask[lat] = utils.convert_lat_0_180_to_neg90_90(mask[lat])
+            if verbose : print('   masking some locations with the mask that was provided.')
+            df = utils.apply_spatial_mask(df,mask,lat,lon,'mask')
+                
         try:
+            if verbose : print(f'   computing semivariances of the {quantity}')
             if ref_bins is None:
-                b, g_exp, bin_count, _ = variogram_with_gstat(df,
+                b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type: ignore
                                                             quantity=quantity,
                                                             trend=trend,
-                                                            maxlag="median",
+                                                            maxlag=maxlag,
+                                                            nlags=nlags,
                                                             direction=direction,
+                                                            tolerance = tolerance,
                                                             return_Variogram_object=False,
                                                             verbose=verbose,
-                                                        ) #type: ignore
+                                                            x='x',
+                                                            y='y'
+                                                        )
                 ref_bins = b
             else:
-                b, g_exp, bin_count, _ = variogram_with_gstat(df,
+                b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type:ignore
                                                             quantity=quantity,
                                                             direction=direction,
+                                                            tolerance = tolerance,
                                                             trend=trend,
-                                                            centers=ref_bins,
+                                                            centers=ref_bins,        # type:ignore
                                                             return_Variogram_object=False,
                                                             verbose=verbose,
-                                                        ) # type:ignore
+                                                            x='x',
+                                                            y='y'
+                                                        )
 
             bin_counts.append(bin_count)
             gammas.append(g_exp)
-
+            quantity = quantity_tmp
+            trend  = trend_tmp
         except Exception as e:
-            print(f"   Skipped {t}: {e}")
+            raise e
 
     print("finished loop")
     return bin_counts, gammas, ref_bins
@@ -505,34 +596,34 @@ def aggregate_variograms(bin_counts,gammas,bins):
 # =========================================================================
 # variogram **models** and fit function 
 # =========================================================================
-def spherical_model(h, sill, range_, nugget=0):
-    """Spherical model for variograms 
-    """
-    gamma = np.where(
-        h <= range_, # condition
-        nugget + sill*(1.5*(h/range_) -0.5*(h/range_)**3), # if condition true
-        nugget + sill # else
-    )
-    return gamma
+# def spherical_model(h, sill, range_, nugget=0):
+#     """Spherical model for variograms 
+#     """
+#     gamma = np.where(
+#         h <= range_, # condition
+#         nugget + sill*(1.5*(h/range_) -0.5*(h/range_)**3), # if condition true
+#         nugget + sill # else
+#     )
+#     return gamma
 
-def exponential_model(h, sill, range_, nugget=0):
-    """ Exponential model for variograms
-    """
-    return nugget + sill*(1 - np.exp(-h/range_))
+# def exponential_model(h, sill, range_, nugget=0):
+#     """ Exponential model for variograms
+#     """
+#     return nugget + sill*(1 - np.exp(-h/range_))
 
-def gaussian_model(h, sill, range_, nugget=0):
-    """Gaussian variogram model
-    """
-    return nugget + sill*(1 - np.exp(-(h**2)/(range_**2)))
+# def gaussian_model(h, sill, range_, nugget=0):
+#     """Gaussian variogram model
+#     """
+#     return nugget + sill*(1 - np.exp(-(h**2)/(range_**2)))
 
-def composite_model(h, *params):
-    """
-    Composite model supporting up to two components.
-    Example parameter order:
-      sill1, range1, sill2, range2, nugget
-    """
-    sill1, range1, sill2, range2, nugget = params
-    return (spherical_model(h, sill1, range1, nugget=0) + gaussian_model(h, sill2, range2, nugget=0) + nugget )
+# def composite_model(h, *params):
+#     """
+#     Composite model supporting up to two components.
+#     Exemple parameter order:
+#       sill1, range1, sill2, range2, nugget
+#     """
+#     sill1, range1, sill2, range2, nugget = params
+#     return (spherical_model(h, sill1, range1, nugget=0) + gaussian_model(h, sill2, range2, nugget=0) + nugget )
 
 def effective_range(bins, fitted_fct, frac=0.95):
     """Compute the lag where gamma(h) reaches the given fraction frac of total sill.
@@ -543,7 +634,7 @@ def effective_range(bins, fitted_fct, frac=0.95):
     idx = np.where(gamma >= frac*sill_total)[0]
     return h[idx[0]] if len(idx) > 0 else np.nan
 
-def fit_variogram_model(bins, gammas, model='spherical', initial_params=None, bounds=None, pair_counts=None,):
+def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=None, bounds=None, pair_counts=None,):
     """
     Fit a theoretical variogram model to empirical data (distances=bins and semivariances=gammas).
 
@@ -570,26 +661,26 @@ def fit_variogram_model(bins, gammas, model='spherical', initial_params=None, bo
             Covariance matrix of the fit
     """
 
-    model_dict = {
-        'spherical': (spherical_model, ['sill', 'range', 'nugget']),
-        'exponential': (exponential_model, ['sill', 'range', 'nugget']),
-        'gaussian': (gaussian_model, ['sill', 'range', 'nugget']),
-        'composite': (composite_model, ['sill1', 'range1', 'sill2', 'range2', 'nugget'])
-    }
+    # model_dict = {
+    #     'spherical': (spherical_model, ['sill', 'range', 'nugget']),
+    #     'exponential': (exponential_model, ['sill', 'range', 'nugget']),
+    #     'gaussian': (gaussian_model, ['sill', 'range', 'nugget']),
+    #     'composite': (composite_model, ['sill1', 'range1', 'sill2', 'range2', 'nugget'])
+    # }
 
-    if model not in model_dict:
-        raise ValueError(f"Unknown model '{model}'. Choose from {list(model_dict.keys())}.")
-
-    func, param_names = model_dict[model]
+    # func, param_names = model_dict[model]
+    model = variogram_models.define_model(model_name)
+    func = model.get_model_func()
+    param_names = model.params
 
     if initial_params is None:
         sill_guess = np.nanmax(gammas)
         range_guess = np.nanmax(bins) / 3
         nugget_guess = gammas[0]
-        if model == 'composite':
-            initial_params = [sill_guess/2, range_guess, sill_guess/2, range_guess*2, nugget_guess]
+        if '+' in model_name:
+            initial_params = [nugget_guess,range_guess, sill_guess/2,range_guess*2, sill_guess/2]
         else:
-            initial_params = [sill_guess, range_guess, nugget_guess]
+            initial_params = [range_guess,sill_guess, nugget_guess]
 
     if pair_counts is not None:
         pair_counts = np.asarray(pair_counts)
@@ -601,7 +692,7 @@ def fit_variogram_model(bins, gammas, model='spherical', initial_params=None, bo
         popt, pcov = curve_fit(func, bins, gammas, p0=initial_params, bounds=bounds or (-np.inf, np.inf), sigma=sigma, absolute_sigma=False)
         fitted_fct = make_fitted_model_func(func,*popt)
         params = {name: val for name, val in zip(param_names, popt)}
-        params['model_name'] = model
+        params['model_name'] = model_name
     except Exception as e :
         print(e)
         params, fitted_fct,pcov = None,None, None
@@ -644,9 +735,9 @@ def get_sisal_data_for_kriging(res : int = 200,
     if countries is not None :
         data_df_drip_water = utils.mask_country_shape(data_df_drip_water,buffer_km=buffer_km,country_names=countries)
 
-    data_ready = data_df_drip_water.rename(columns={'lat':'latitude','lon':'longitude'}) # type:ignore
+    # data_ready = data_df_drip_water.rename(columns={'lat':'latitude','lon':'longitude'}) # type:ignore
     print('sisal dataframe is ready')
-    return data_ready
+    return data_df_drip_water
 
 def preprocessed_itrace_data(res=None,
                             itrace_data_folder = '../data/modern/iTrace/',
@@ -720,17 +811,17 @@ def preprocessed_itrace_data(res=None,
         d18_P_ds = xr.Dataset({'d18Op':d18_da_binned, 'P': P_da_binned})
     
     # outputs differ depending on bools P_da, delta18_da... Return df of xrdataarrays.
-    if (~ P)&(format=='xr') : return d18_da_binned
+    if (not P)&(format=='xr') : return d18_da_binned
     if P&(format=='xr') : return d18_P_ds
     
     if verbose : print('   converting xr to DataFrame (~2 minutes)')
     if format=='df' :
         if P : 
-            d18_P_df= d18_P_ds.to_dataframe().reset_index().dropna(subset=['P','d18Op']).rename(columns={'lon':'longitude','lat':'latitude'})
+            d18_P_df= d18_P_ds.to_dataframe().reset_index().dropna(subset=['P','d18Op'])
             print('done')
             return d18_P_df
         else :
-            d18_df = d18_da_binned.to_dataframe(name='d18Op').reset_index().dropna().rename(columns={'lon':'longitude','lat':'latitude'}) #type:ignore
+            d18_df = d18_da_binned.to_dataframe(name='d18Op').reset_index().dropna() #type:ignore
             print('done')
             return d18_df
 
@@ -741,7 +832,9 @@ def preprocessed_itrace_data(res=None,
 def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame, 
                                         # time : float,
                                         # res = 31,
-                                        variables : list[str]=['elev','dcoast'],
+                                        variables : list[str]=['ele','D'],
+                                        lat = 'lat',
+                                        lon = 'lon',
                                         dem_file : str = "../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",
                                         coast_shapefile : str = "../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",
                                         # rain_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN.800001-899912.nc',
@@ -750,10 +843,10 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
     print(f'-> Adding external variables {variables}.')
     df = df_orig.copy()
     # check that latitude and longitudes are defined symetrically around 0° 
-    if any(df['lat'])>90:
-        df['lat']=utils.convert_lat_0_180_to_neg90_90(np.array(df['lat'].values))
-    if any(df['lon'])>180 :
-        df['lon']=utils.convert_lon_0_360_to_neg180_180(np.array(df['lon'].values))
+    if any(df[lat])>90:
+        df[lat]=utils.convert_lat_0_180_to_neg90_90(np.array(df[lat].values))
+    if any(df[lon])>180 :
+        df[lon]=utils.convert_lon_0_360_to_neg180_180(np.array(df[lon].values))
     
     # add columns with the variables specified in argument
     if 'ele' in variables :
@@ -761,27 +854,27 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
         df = interpolate_dem_at_latlon_points(df,dem_file = dem_file)
     if 'D' in variables:
         print(f'   > coastlines will be taken from file {coast_shapefile}')
-        df = compute_distance_to_coast(df,coast_shapefile)
+        df = compute_distance_to_coast(df,coast_shapefile,lat=lat,lon=lon)
     # if 'P' in variables :
     #     print(f'P rain will be taken from file {rain_file} \nP snow file will be taken from file {snow_file}')
     #     df = add_P_to_itrace_df(df,time=time,res=res,rain_file=rain_file,snow_file=snow_file)
     return df
 
-def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc"):
+def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",lat='lat',lon='lon'):
     """ TODO 
     lat : -90 to 90
     lon : -180 to 180
     """
     df = df_latlon.copy()
-    if any(df['lon']>180):
-        df['lon']=utils.convert_lon_0_360_to_neg180_180(np.array(df['lon']))
-    if any(df['lat']>90):
-        df['lat']=utils.convert_lat_0_180_to_neg90_90(np.array(df['lat']))
+    if any(df[lon]>180):
+        df[lon]=utils.convert_lon_0_360_to_neg180_180(np.array(df[lon]))
+    if any(df[lat]>90):
+        df[lat]=utils.convert_lat_0_180_to_neg90_90(np.array(df[lat]))
 
     # Load global elevation grid (ETOPO for instance)
     ds = xr.open_dataset(dem_file,engine='netcdf4') # ds must have lat/lon coords and z variable
-    lats_dem = ds['lat'].values
-    lons_dem = ds['lon'].values
+    lats_dem = ds[lat].values
+    lons_dem = ds[lon].values
     elevation_grid = ds['z'].values
 
     # interpolation at df points
@@ -792,35 +885,37 @@ def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="..
         fill_value=np.nan
     )
 
-    lats_df = df['lat'].values
-    lons_df = df['lon'].values
+    lats_df = df[lat].values
+    lons_df = df[lon].values
 
     elev_at_obs = interp_elev(np.column_stack([lats_df, lons_df])) # type: ignore
-    df['elevation'] = elev_at_obs
+    df['ele'] = elev_at_obs
 
     # we seen there are points at -6000m (indonesia, in the ocean). This is a problem since I suppose that itrace simulation only models terrestrial points, but there was a buffer wround the coast that included some points in the ocean.
     # either i must manage to mask these points, or clip the values to sea level (or -423m, the lowest surface elevation?)
-    df.loc[df['elevation']<0,'elevation']=0
-    df = df.dropna(subset=['elevation'])
+    df.loc[df['ele']<0,'ele']=0
+    df = df.dropna(subset=['ele'])
     
     return df
 
-def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp"):
+def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",lat='lat',lon='lon'):
     """
     Add geodesic distance to nearest coastline (in meters) to a dataframe 
-    containing columns 'lat' and 'lon'.
+    containing columns lat and lon.
     Inputs:
-        df : pandas.DataFrame, it must contain 'lat' and 'lon' columns.
+        df : pandas.DataFrame, it must contain lat and lon columns.
+        lat : str
+        lon : str
         coast_shp_path : str, the path to a coastline shapefile.
     Outputs:
-        df : pandas.DataFrame, same dataframe as input but with an extra column 'dist_coast_m'.
+        df : pandas.DataFrame, same dataframe as input but with an extra column 'D'.
     """
     df = df_latlon.copy()
 
-    if any(df['lon']>180):
-        df['lon'] = utils.convert_lon_0_360_to_neg180_180(df['lon'].values)
-    if any(df['lat']>90):
-        df['lat'] = utils.convert_lat_0_180_to_neg90_90(df['lat'].values)
+    if any(df[lon]>180):
+        df[lon] = utils.convert_lon_0_360_to_neg180_180(df[lon].values)
+    if any(df[lat]>90):
+        df[lat] = utils.convert_lat_0_180_to_neg90_90(df[lat].values)
     
     coast = gpd.read_file(coast_shp_path).to_crs("EPSG:4326")
 
@@ -828,7 +923,7 @@ def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_1
 
     distances = []
     for _, row in df.iterrows():
-        pt = Point(row["lon"], row["lat"])
+        pt = Point(row[lon], row[lat])
         # find actual nearest geometry, not just BB neighbors
         nearest_idx = coast.sindex.nearest(pt)[1]
         nearest_geom = coast.geometry.iloc[nearest_idx]
@@ -838,7 +933,7 @@ def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_1
         _, _, dist = geod.inv(p1.iloc[0].x, p1.iloc[0].y, p2.iloc[0].x, p2.iloc[0].y) # type: ignore
         distances.append(dist)
 
-    df["dist_coast_m"] = distances
+    df["D"] = distances # dist to coast in m
     return df
 
 # def add_P_to_itrace_df(df,

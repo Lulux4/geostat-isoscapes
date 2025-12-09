@@ -129,7 +129,8 @@ def plot_variogram_from_bins_and_gamma(centers,
                                        model_params = None,
                                        figsize: tuple[int,int]=(10,5),
                                        ax_ = None,
-                                       save_name : str | None = None
+                                       save_name : str | None = None,
+                                       verbose : bool =  False
                                        ) -> tuple[Figure,Axes] | Axes :
     """ Plot an empirical variogram from given bin centers and semivariances values.
     Overlays pairs number per bin if counts is given. Does not plot bins with less than min_pairs if counts is given.
@@ -150,19 +151,20 @@ def plot_variogram_from_bins_and_gamma(centers,
 
     # Overlay model if wanted and given
     if (plot_model) and (model_name is not None) and (model_fct is not None):
+        if verbose : print('plotting model')
         h = np.arange(0,centers.max(),10000)
-        legend_model = model_name if model_name!='composite' else 'spherical+gaussian'
+        legend_model = model_name 
         ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{legend_model} fit')
         sill,range_,nugget= None,None,None
         
-        if (model_name != 'composite') and (model_params is not None) :
+        if (not ('+' in model_name)) and (model_params is not None) :
             range_ = model_params['range']
             sill = model_params['sill']+model_params['nugget']
             nugget = model_params['nugget']
             ax.vlines(range_,0,max(gamma),color="#FF1E00",linestyle='--',alpha=0.2,label=f"range")
             ax.hlines(sill,0,max(centers),color="#BD6D12",linestyle='--',alpha=0.2,label=f"sill")
         
-        elif (model_name =='composite') and (model_params is not None) :
+        elif ('+' in model_name) and (model_params is not None) :
             range_ = gutils.effective_range(centers,model_fct,0.95)
             sill = model_params['sill1']+model_params['sill2']+model_params['nugget']
             nugget= model_params['nugget']
@@ -253,15 +255,17 @@ def plot_global_map(data:pd.DataFrame,
                     quantity:str='d18O',
                     unit:str='‰ VPDB',
                     proj:bool=True,
-                    symbol : str ='square')-> go.Figure:
+                    symbol : str ='square',
+                    lon_col : str = 'longitude',
+                    lat_col : str = 'latitude')-> go.Figure:
     ''' 3D or flat earth (natural earth proj)
     If proj=True : 2D 
     else : 3D
     '''
     fig = go.Figure()
     fig.add_trace(go.Scattergeo(
-        lon=data["longitude"],
-        lat=data["latitude"],
+        lon=data[lon_col],
+        lat=data[lat_col],
         text=data[quantity_col],
         mode="markers",
         marker=dict(
