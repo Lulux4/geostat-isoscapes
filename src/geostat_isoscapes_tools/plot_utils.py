@@ -256,6 +256,7 @@ def plot_global_map(data:pd.DataFrame,
                     unit:str='‰ VPDB',
                     proj:bool=True,
                     symbol : str ='square',
+                    size : int =10,
                     lon_col : str = 'longitude',
                     lat_col : str = 'latitude')-> go.Figure:
     ''' 3D or flat earth (natural earth proj)
@@ -270,13 +271,13 @@ def plot_global_map(data:pd.DataFrame,
         mode="markers",
         marker=dict(
             symbol=symbol,
-            size=10,
+            size=size,
             color=data[quantity_col],
             colorscale='plasma',
             # cmin=-15.5,
             # cmax=0,
             opacity=0.7,
-            line=dict(color="white", width=1),
+            # line=dict(color="white", width=1),
             colorbar=dict(
                 title=f"{quantity}({unit})",
                 ticks="outside",

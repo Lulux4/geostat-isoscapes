@@ -17,6 +17,7 @@ from shapely.ops import nearest_points
 import geopandas as gpd
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+import json 
 
 # ==========================================================
 # Coordinates projections 
@@ -102,15 +103,15 @@ def detrend_multiple_linear_regression(df_to_detrend,
         X_cols.append(D_col)
     if 'P' in features:
         X_cols.append(P_col)
+
     # Check that at least one predictor is included
     if len(X_cols)==0:
         raise ValueError('Must set at least one of the include_xxx parameters to True!')
 
     X = df[X_cols].values
     y = df[value_col].values
-    # 
+    
     # print('The predictors are ', X_cols)
-    # Fit and get contributions
     result_dict = fit_multiple_linear_model(X, y,X_cols)
 
     # beta = result_dict['parameters']
@@ -137,9 +138,6 @@ def fit_multiple_linear_model(X, y,predictors):
     model_full  = sm.OLS(y, X_full).fit()
     beta_full =  model_full.params
     ssr_full = np.sum(model_full.resid**2)
-    # beta_full = np.linalg.lstsq(X_full, y, rcond=None)[0]
-    # resid_full = y - X_full @ beta_full
-    # ssr_full = np.sum(resid_full**2)
     
     # r2 and adjusted r2
     y_pred = model_full.fittedvalues
@@ -154,10 +152,7 @@ def fit_multiple_linear_model(X, y,predictors):
         X_reduced = np.delete(X_full, j+1, axis=1)
         model_reduced = sm.OLS(y, X_reduced).fit()
         ssr_reduced = np.sum(model_reduced.resid**2)
-        # X_reduced = np.column_stack([np.ones(len(X)), np.delete(X, j, axis=1)])
-        # beta_reduced = np.linalg.lstsq(X_reduced, y, rcond=None)[0]
-        # resid_reduced = y - X_reduced @ beta_reduced
-        # ssr_reduced = np.sum(resid_reduced**2)
+
         # Partial R square
         r2_j = (ssr_reduced - ssr_full)/sst
         partial_r2[predictors[j]] = r2_j
@@ -167,8 +162,8 @@ def fit_multiple_linear_model(X, y,predictors):
     coefficient_std = dict(zip(["intercept"] + predictors, model_full.bse))
        
     # dict of results 
-    result_dict = {'parameters':beta_full,
-                   'y_pred':y_pred,
+    result_dict = {'parameters':dict(zip(["intercept"] + predictors,beta_full)),
+                   'y_pred':list(y_pred),
                    'mae':mae,
                    'parameters_std': coefficient_std,
                    'r2':full_r2,
@@ -180,8 +175,8 @@ def fit_multiple_linear_model(X, y,predictors):
     if len(predictors)>1:
         vif = {predictors[i]: variance_inflation_factor(X_full[:, 1:], i) for i in range(len(predictors)) } # bc we need to exclude the intercept
         result_dict['vif']=vif
-        result_dict["vif"]["intercept"] = pd.NA
-    result_dict["partial r2"]["intercept"] = pd.NA
+        result_dict["vif"]["intercept"] = None
+    result_dict["partial r2"]["intercept"] = None
     
     return result_dict
 
@@ -191,7 +186,7 @@ def multiple_linear_result_dict_to_df(result_dict):
     """
     res_df = pd.DataFrame({
                     "name": result_dict['parameters_std'].keys(),
-                    "beta": result_dict["parameters"],
+                    "beta": result_dict["parameters"].values(),
                     "std_error": result_dict["parameters_std"].values(),
                     "p_value": result_dict["p"].values(),
                 })
@@ -281,10 +276,10 @@ def variogram_gstools(coords,
     return bin_centers, gamma, counts
 
 
-def variogram_with_gstat(df,
-                         quantity:str,
-                         sample_size=3000,
-                         direction : int | None = None,
+def variogram_with_gstat(df : pd.DataFrame,
+                         quantity : str = 'd18Op',
+                         sample_size : int =3000,
+                         direction : float | None = None,
                          trend: str|None = None, 
                          nlags : int = 30, 
                          maxlag : float | str | None = 'median', 
@@ -446,19 +441,19 @@ def get_vario_parameters_dict(parameters):
 #     print('finished loop') 
 #     return bin_counts, gammas, ref_bins
 
-def iterative_variogram_computations(ds : xr.DataArray,
-                                    quantity="d18Op",
-                                    ref_bins=None,
-                                    direction=None,
-                                    tolerance=22.5,
-                                    trend="plane",
-                                    maxlag = None,
-                                    nlags = 20,
-                                    mask = None,
-                                    trend_before_masking = True,
-                                    lat = 'lat',
-                                    lon='lon',
-                                    verbose=False):
+def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
+                                    quantity : str ="d18Op",
+                                    ref_bins : np.ndarray | None =None,
+                                    direction : float | None = None,
+                                    tolerance : float = 22.5,
+                                    trend : str| None = None,
+                                    maxlag : float | None | str = None,
+                                    nlags : int = 20,
+                                    mask : pd.DataFrame | None = None,
+                                    trend_before_masking : bool = True,
+                                    lat: str = 'lat',
+                                    lon : str ='lon',
+                                    verbose : bool =False):
     """
     Vario computation looping over an xarray dataset.
 
@@ -476,15 +471,12 @@ def iterative_variogram_computations(ds : xr.DataArray,
     """
     quantity_tmp = quantity
     trend_tmp = trend
-    xs, ys, lons, lats, exog_df = None,None,None,None,None
+    xs, ys, lons, lats, exog_df,trend_results = None,None,None,None,None,{}
     bin_counts, gammas = [], []
 
     for v in [lon, lat, quantity]:
         if v not in ds:
             raise ValueError(f"Dataset must contain a '{v}' variable.")
-
-    print("-> initializing loop...")
-    print("   starting loop...")
 
     for t, ds_t in tqdm(ds.groupby("time")):
         # Convert to DataFrame
@@ -517,7 +509,7 @@ def iterative_variogram_computations(ds : xr.DataArray,
                     variables = [v for v in variables if v in ['ele','D']]
                     cols_exog = variables.copy()
                     cols_exog.extend([lat,lon])
-                    exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon)[cols_exog]
+                    exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon,verbose=False)[cols_exog]
 
             df = df.merge(exog_df,on=[lat,lon]) # type:ignore
             df = df.dropna(axis=0) # removes locs where exog data was not available
@@ -525,7 +517,8 @@ def iterative_variogram_computations(ds : xr.DataArray,
         # If specified : fit and remove trend here instead of inside variogram_with_gstat
         if (trend is not None) & (mask is not None) and (trend_before_masking) :
             if verbose : print('   removing trend using all available locations.')
-            df['resid'],trend_results = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon)
+            df['resid'],dict_trend = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon)
+            trend_results[str(t)] = dict_trend
             quantity = 'resid'
             trend = None
         
@@ -533,9 +526,9 @@ def iterative_variogram_computations(ds : xr.DataArray,
         if mask is not None :
             # sanity check for the latlon format
             if any(mask[lon]>180):
-                mask[lon] = utils.convert_lon_0_360_to_neg180_180(mask[lon])
+                mask[lon] = utils.convert_lon_0_360_to_neg180_180(np.array(mask[lon]))
             if any(mask[lat]>90):
-                mask[lat] = utils.convert_lat_0_180_to_neg90_90(mask[lat])
+                mask[lat] = utils.convert_lat_0_180_to_neg90_90(np.array(mask[lat]))
             if verbose : print('   masking some locations with the mask that was provided.')
             df = utils.apply_spatial_mask(df,mask,lat,lon,'mask')
                 
@@ -554,7 +547,7 @@ def iterative_variogram_computations(ds : xr.DataArray,
                                                             x='x',
                                                             y='y'
                                                         )
-                ref_bins = b
+                ref_bins = np.array(b)
             else:
                 b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type:ignore
                                                             quantity=quantity,
@@ -575,8 +568,7 @@ def iterative_variogram_computations(ds : xr.DataArray,
         except Exception as e:
             raise e
 
-    print("finished loop")
-    return bin_counts, gammas, ref_bins
+    return bin_counts, gammas, ref_bins, trend_results
 
 def aggregate_variograms(bin_counts,gammas,bins):
     """ TODO 
@@ -593,38 +585,55 @@ def aggregate_variograms(bin_counts,gammas,bins):
     df = pd.DataFrame({'lag':bins_mask, 'gamma':weighted_mean_gamma_mask, 'count':total_counts_mask})
     return df
 
+def iterate_and_aggregate_variograms(data_ds : xr.DataArray | xr.Dataset,
+                                     fp : str,
+                                     config_dict : dict, 
+                                     mask_pts : pd.DataFrame | None = None,
+                                     data_cols : dict = {'lat':'lat','lon':'lon','quantity':'d18Op'},
+                                     verbose : bool = False):
+    """ TODO """
+    # if a mask must be applied, define it here 
+    mask_df = None
+    if mask_pts is not None :
+        if verbose : print('Defining spatial mask around anchor points')
+        _, mask_da = utils.mask_union_of_circles_around_pts(data_to_mask=data_ds,
+                                                            df_ref_pts=mask_pts,
+                                                            radius_km=config_dict['mask radius [km]'],
+                                                            lat_name=data_cols['lat'],
+                                                            lon_name=data_cols['lon'],
+                                                            verbose = verbose) # type:ignore
+        mask_df = mask_da.to_dataframe(name='mask').reset_index().dropna()[['lon','lat','mask']].drop_duplicates() #type:ignore
+        
+    # Loop over the different time slices to compute the each variogram
+    if verbose : print('Start variogram computation iterations')
+    bin_count,gammas, ref_bins, results_dict = iterative_variogram_computations(data_ds,
+                                                                                quantity = data_cols['quantity'],
+                                                                                trend = config_dict['trend'],
+                                                                                maxlag = config_dict['maxlag'],
+                                                                                nlags = config_dict['nlags'],
+                                                                                mask = mask_df,
+                                                                                ref_bins = config_dict['centers'],
+                                                                                direction = config_dict['direction'],
+                                                                                tolerance = config_dict['tolerance'],
+                                                                                trend_before_masking = config_dict['trend_before_mask'],
+                                                                                lat = data_cols['lat'],
+                                                                                lon = data_cols['lon'],
+                                                                                verbose=verbose)
+    # aggregate semivariances
+    if verbose : print('Aggregate variograms')
+    df_all = aggregate_variograms(bin_counts=bin_count,gammas=gammas,bins=ref_bins)
+    # save results
+    if config_dict['direction'] is not None : # add info on direction in file names
+        fp+=f"d{str(config_dict['direction'])}"
+    
+    df_all.to_csv(f'{fp}vario_df.csv')
+    with open(f'{fp}trend_metrics.json', 'w') as f:
+        json.dump(results_dict, f)
+    print(f'outputs saved in folder {fp}, files vario_df.csv and trend_metrics.json')
+
 # =========================================================================
-# variogram **models** and fit function 
+# Vario fit function 
 # =========================================================================
-# def spherical_model(h, sill, range_, nugget=0):
-#     """Spherical model for variograms 
-#     """
-#     gamma = np.where(
-#         h <= range_, # condition
-#         nugget + sill*(1.5*(h/range_) -0.5*(h/range_)**3), # if condition true
-#         nugget + sill # else
-#     )
-#     return gamma
-
-# def exponential_model(h, sill, range_, nugget=0):
-#     """ Exponential model for variograms
-#     """
-#     return nugget + sill*(1 - np.exp(-h/range_))
-
-# def gaussian_model(h, sill, range_, nugget=0):
-#     """Gaussian variogram model
-#     """
-#     return nugget + sill*(1 - np.exp(-(h**2)/(range_**2)))
-
-# def composite_model(h, *params):
-#     """
-#     Composite model supporting up to two components.
-#     Exemple parameter order:
-#       sill1, range1, sill2, range2, nugget
-#     """
-#     sill1, range1, sill2, range2, nugget = params
-#     return (spherical_model(h, sill1, range1, nugget=0) + gaussian_model(h, sill2, range2, nugget=0) + nugget )
-
 def effective_range(bins, fitted_fct, frac=0.95):
     """Compute the lag where gamma(h) reaches the given fraction frac of total sill.
     """
@@ -830,17 +839,13 @@ def preprocessed_itrace_data(res=None,
 # ========================================================================
 
 def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame, 
-                                        # time : float,
-                                        # res = 31,
                                         variables : list[str]=['ele','D'],
                                         lat = 'lat',
                                         lon = 'lon',
                                         dem_file : str = "../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",
                                         coast_shapefile : str = "../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",
-                                        # rain_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN.800001-899912.nc',
-                                        # snow_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.SNOW.800001-899912.nc',       
-                                        ):
-    print(f'-> Adding external variables {variables}.')
+                                        verbose : bool = False):
+    if verbose : print(f'-> Adding external variables {variables}.')
     df = df_orig.copy()
     # check that latitude and longitudes are defined symetrically around 0° 
     if any(df[lat])>90:
@@ -850,14 +855,11 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
     
     # add columns with the variables specified in argument
     if 'ele' in variables :
-        print(f'   > elevation data will be taken from file {dem_file}')
+        if verbose : print(f'   > elevation data will be taken from file {dem_file}')
         df = interpolate_dem_at_latlon_points(df,dem_file = dem_file)
     if 'D' in variables:
-        print(f'   > coastlines will be taken from file {coast_shapefile}')
+        if verbose : print(f'   > coastlines will be taken from file {coast_shapefile}')
         df = compute_distance_to_coast(df,coast_shapefile,lat=lat,lon=lon)
-    # if 'P' in variables :
-    #     print(f'P rain will be taken from file {rain_file} \nP snow file will be taken from file {snow_file}')
-    #     df = add_P_to_itrace_df(df,time=time,res=res,rain_file=rain_file,snow_file=snow_file)
     return df
 
 def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",lat='lat',lon='lon'):
@@ -935,41 +937,3 @@ def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_1
 
     df["D"] = distances # dist to coast in m
     return df
-
-# def add_P_to_itrace_df(df,
-#                            time,
-#                            res,
-#                            rain_file : str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.RAIN.800001-899912.nc',
-#                            snow_file :str = '../data/modern/iTrace/b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.SNOW.800001-899912.nc' 
-#                            ):
-#     """ TODO
-#     P = total atmospheric precipitation that reached the ground, including snowfall and rainfall, in water mm equivalents.
-#     /!/ For consistency, rain and snow files must be the outputs of the same piece of simulation as the data in df : same grid, same time step.
-#     inputs :
-#         rain file must be a netcdf dataset containing variable RAIN and dimensions lat,lon,time
-#         snow file must be a netcdf dataset containing variable SNOW and dimensions lat,lon,time
-#     output: 
-#         df
-#     """
-#     # load netcdf files 
-#     file_rain = utils.load_xarray_datarray(rain_file)
-#     file_snow = utils.load_xarray_datarray(snow_file)
-#     # file_rain.info()
-#     # file_snow.info()
-#     rain_da = file_rain.RAIN
-#     snow_da = file_snow.SNOW
-    
-#     # compute total precip 
-#     P_da = rain_da + snow_da
-    
-#     # bin time to match itrace_da resolution
-#     P_da_binned = utils.bin_xrDataArray_time(P_da,res=res)
-#     P_da_binned = P_da_binned * res * 24 * 3600 # convert the flux (precipitation rate) to the "res" days total (typicaly res=31 -> monthly amount) 
-    
-#     df_P=P_da_binned.sel(time=time).to_dataframe(name='P').reset_index().dropna(subset='P') # type:ignore
-    
-#     df_P['lon'] = utils.convert_lon_0_360_to_neg180_180(df_P['lon'])
-
-#     df = pd.merge(df,df_P,how='left',on=['lon','lat','time'])
-    
-#     return df

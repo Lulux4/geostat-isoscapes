@@ -131,7 +131,8 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
                                      df_ref_pts : pd.DataFrame, 
                                      radius_km : int,
                                      lat_name="lat", 
-                                     lon_name="lon",):
+                                     lon_name="lon",
+                                     verbose:bool = False):
     """ Masks points in dataframe or xarray dataset, keeping only the union of circles centered on df_ref_pts points, with a radius radius_km. 
     """
 
@@ -145,10 +146,11 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
         # data points of the df to mask
         locs_to_mask = data_to_mask[[lat_name,lon_name]].drop_duplicates().reset_index(drop=True)
         # Compute min distance from each point to nearest ref point
+        if verbose : print('> computing distances between data points and anchor points')
         distances = cdist(locs_to_mask[[lat_name,lon_name]].values, ref_locs, metric=haversine)  # shape (n_unique_to_mask, n_ref_pts)
         # Mask df
         locs_to_mask['mask'] = distances.min(axis=1)  <= radius_km
-
+        if verbose : print('> done')
         return apply_spatial_mask(data_to_mask,locs_to_mask,lat_name,lon_name,'mask'), locs_to_mask
     # ===============
     # xr version 
@@ -160,6 +162,7 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
         lon2d, lat2d = np.meshgrid(lons,lats)
         locs = np.column_stack([lat2d.ravel(), lon2d.ravel()])  # (nlat*nlon, 2)
         # compute dist
+        if verbose : print('> computing distances between data points and anchor points')
         distances = cdist(locs, ref_locs, metric=haversine)  # (npts, Nref)
         min_dist = distances.min(axis=1).reshape(lat2d.shape)  # reshape to (lat,lon)
         # mask
@@ -168,7 +171,7 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
                             dims=(lat_name, lon_name),
                             coords={lat_name: data_to_mask[lat_name], lon_name: data_to_mask[lon_name]},
                         ).expand_dims(time=data_to_mask.time)
-        
+        if verbose : print('> done')
         return data_to_mask.where(mask), mask
 
 
