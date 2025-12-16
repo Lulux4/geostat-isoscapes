@@ -175,7 +175,7 @@ def plot_variogram_from_bins_and_gamma(centers,
             if counts is not None : 
                 weights = gutils.get_weights_from_pair_counts(counts)
             r2 = utils.compute_r2(gamma, model_fct(centers), weights=weights)
-            textstr = f"Range: {range_:.1e} m\nSill: {sill:.2f} ‰²\nNugget: {nugget:.2f} ‰²\nR²: {r2:.2f}"
+            textstr = f"Range: {range_:.2e} m\nSill: {sill:.2f} ‰²\nNugget: {nugget:.2f} ‰²\nR²: {r2:.2f}"
             ax.text(0.835, 0.22, textstr,
                     transform=ax.transAxes,
                     fontsize=10,
@@ -210,13 +210,13 @@ def plot_variogram_from_bins_and_gamma(centers,
         return fig,ax
     return ax
 
-def plot_elevation_map( df, countries_borders: bool = False) -> tuple[Figure, Axes]:
+def plot_elevation_map( df, col_elevation : str = 'ele', countries_borders: bool = False) -> tuple[Figure, Axes]:
     """ Plot an elevation map from given latitudes, longitudes and elevation grid.
     """
     fig, ax = plt.subplots(figsize=(10, 5),
                            subplot_kw={"projection": ccrs.PlateCarree()})
 
-    sc = ax.scatter(df['lon'], df['lat'], c=df['elevation'], cmap='terrain', s=2, edgecolor=None)
+    sc = ax.scatter(df['lon'], df['lat'], c=df[col_elevation], cmap='terrain', s=2, edgecolor=None)
     cbar = plt.colorbar(sc, ax=ax, orientation='vertical', label='Elevation (m)')
     if countries_borders:
         country_borders = cfeature.NaturalEarthFeature(
@@ -229,13 +229,13 @@ def plot_elevation_map( df, countries_borders: bool = False) -> tuple[Figure, Ax
     ax.coastlines() # type:ignore
     return fig, ax
 
-def plot_dist_to_coast_map(df,countries_borders: bool = False) -> tuple[Figure, Axes]:
+def plot_dist_to_coast_map(df,col_dist :str = 'D',countries_borders: bool = False) -> tuple[Figure, Axes]:
     """ Plot a distance to coast map from given df containing latitudes, longitudes and distance to coast grid.
     """
     fig, ax = plt.subplots(figsize=(10, 5),
                            subplot_kw={"projection": ccrs.PlateCarree()})
 
-    sc = ax.scatter(df['lon'], df['lat'], c=df['dist_coast_m'], cmap='viridis', s=2, edgecolor=None)
+    sc = ax.scatter(df['lon'], df['lat'], c=df[col_dist], cmap='viridis', s=2, edgecolor=None)
     cbar = plt.colorbar(sc, ax=ax, orientation='vertical', label='Distance to coast (km)')
     if countries_borders:
         country_borders = cfeature.NaturalEarthFeature(

@@ -34,13 +34,14 @@ def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray :
     tmin, tmax = float(da.time.min()), float(da.time.max())
     bins = np.arange(tmin, tmax + int(res), int(res)) #type:ignore
 
-    da_binned = da.groupby_bins('time', bins=bins).mean()
+    da_binned = da.groupby_bins('time', bins=bins).median()
     da_binned = da_binned.rename({'time_bins': 'time'})
     return da_binned.assign_coords(time=bins[:-1])
 
-def get_yrBP_from_itrace_time(days_after_start : int, start_year : int = 11700)->float:
-    """ TODO"""
-    return start_year + days_after_start / 365.0
+def get_yrBP_from_itrace_time(months_after_start : int, start_year : float = 12001)->float:
+    """ Retrieve the year (+decimals) depending on a start year in yr BP (positive number) and the number of months spent since this start year.
+    """
+    return -( -start_year + months_after_start/12)
 
 # =============================================================================================
 # "Spatial" computations
@@ -143,6 +144,11 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
     # pandas version
     # ===============
     if isinstance(data_to_mask,pd.DataFrame):
+        if any(data_to_mask[lat_name]>90):
+            data_to_mask[lat_name] = convert_lat_0_180_to_neg90_90(np.array(data_to_mask[lat_name]))
+        if any(data_to_mask[lon_name]>180):
+            data_to_mask[lon_name] = convert_lon_0_360_to_neg180_180(np.array(data_to_mask[lon_name]))
+
         # data points of the df to mask
         locs_to_mask = data_to_mask[[lat_name,lon_name]].drop_duplicates().reset_index(drop=True)
         # Compute min distance from each point to nearest ref point
@@ -151,7 +157,7 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
         # Mask df
         locs_to_mask['mask'] = distances.min(axis=1)  <= radius_km
         if verbose : print('> done')
-        return apply_spatial_mask(data_to_mask,locs_to_mask,lat_name,lon_name,'mask'), locs_to_mask
+        return apply_spatial_mask(df=data_to_mask,spatial_mask=locs_to_mask,lat=lat_name,lon=lon_name,mask_col='mask'), locs_to_mask
     # ===============
     # xr version 
     # ===============

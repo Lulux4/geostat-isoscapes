@@ -83,18 +83,19 @@ def detrend_multiple_linear_regression(df_to_detrend,
     # Build design matrix
     X_cols = []
     if 'lat' in features:
-        if 'lat_abs' in features :
+        if 'lat_' in features : 
+            X_cols.append(lat_col)
+        if 'latabs' in features :
             df['|lat|'] = np.abs(df[lat_col])
             X_cols.append('|lat|')
-        elif 'lat_quad' in features :
+        elif 'latquad' in features :
             df['lat2'] = df[lat_col]**2
             X_cols.append('lat2')
-            X_cols.append('lat')
-        elif 'lat_sqrt' in features :
+            X_cols.append(lat_col)
+        elif 'latsqrt' in features :
             df['sqrt|lat|'] = np.sqrt(np.abs(df[lat_col]))
             X_cols.append('sqrt|lat|')
-        else :
-            X_cols.append(lat_col)
+            
     if 'lon' in features:
         X_cols.append(lon_col)
     if 'ele' in features:
@@ -748,10 +749,14 @@ def get_sisal_data_for_kriging(res : int = 200,
     print('sisal dataframe is ready')
     return data_df_drip_water
 
-def preprocessed_itrace_data(res=None,
-                            itrace_data_folder = '../data/modern/iTrace/',
-                            itrace_sim_prefix = 'b.e13.Bi1850C5.f19_g16.12ka.itrace.ice_ghg_orb_wtr.05.clm2.h0.',
-                            itrace_sim_suffix = '.800001-899912',
+def get_preprocessed_itrace_data(res=None,
+                            data_folder = '../data/modern/iTrace/',
+                            sim_prefix = 'b.e13.Bi1850C5.f19_g16',
+                            sim_kyr = 12,
+                            sim_forcings = 'ice_ghg_orb_wtr',
+                            sim_num = '05',
+                            sim_model = 'clm2.h0',
+                            sim_suffix = '800001-899912',
                             include_snow = True,
                             countries : list| None = None,
                             buffer_km : float = 500,
@@ -765,13 +770,14 @@ def preprocessed_itrace_data(res=None,
     """
     print('loading itrace files')
     # files to find and read :
-    fn_itrace_RAIN_H218O = f'{itrace_data_folder}{itrace_sim_prefix}RAIN_H218O{itrace_sim_suffix}.nc'
-    fn_itrace_RAIN_H2OTR = f'{itrace_data_folder}{itrace_sim_prefix}RAIN_H2OTR{itrace_sim_suffix}.nc'
-    fn_itrace_RAIN = f'{itrace_data_folder}{itrace_sim_prefix}RAIN{itrace_sim_suffix}.nc'
+    fn_merged = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
+    fn_itrace_RAIN_H218O = f'{fn_merged}.RAIN_H218O.{sim_suffix}.nc'
+    fn_itrace_RAIN_H2OTR = f'{fn_merged}.RAIN_H2OTR.{sim_suffix}.nc'
+    fn_itrace_RAIN = f'{fn_merged}.RAIN.{sim_suffix}.nc'
     if include_snow :
-        fn_itrace_SNOW_H218O = f'{itrace_data_folder}{itrace_sim_prefix}SNOW_H218O{itrace_sim_suffix}.nc'
-        fn_itrace_SNOW_H2OTR = f'{itrace_data_folder}{itrace_sim_prefix}SNOW_H2OTR{itrace_sim_suffix}.nc'    
-        fn_itrace_SNOW = f'{itrace_data_folder}{itrace_sim_prefix}SNOW{itrace_sim_suffix}.nc'
+        fn_itrace_SNOW_H218O = f'{fn_merged}.SNOW_H218O.{sim_suffix}.nc'
+        fn_itrace_SNOW_H2OTR = f'{fn_merged}.SNOW_H2OTR.{sim_suffix}.nc'    
+        fn_itrace_SNOW = f'{fn_merged}.SNOW.{sim_suffix}.nc'
 
     # load files 
     file_rH218O = utils.load_xarray_datarray(fn_itrace_RAIN_H218O)
@@ -790,18 +796,18 @@ def preprocessed_itrace_data(res=None,
     delta18 = ( h218o/h2o - 1.0) * 1000.0
     delta18 = delta18.where( (h2o> 1e-12) & (delta18 < 1e2) )  # avoid div by near-0 precip values and large positive outliers (delta18 should be mostly negative and small -20/+20)
     
-    # Fix the temporal resolution 
-    time_series = pd.Series(delta18.time.values)
-    if res is None :
-        maxres = time_series.sort_values().diff().max()
-        if verbose : print(f'   setting regular temporal resolution to {maxres} days')
-        res = maxres
+    # The itrace doc specifies explicetely that the temporal resolution is in months, so we can define the time dimension in terms of months after a start year.
+    if verbose : print('This dataset contains ',len(delta18.time), ' time steps.') # just to check
+    timearray = range(0,len(delta18.time),1)
+    delta18 = delta18.assign_coords(time=('time',timearray))
+    delta18 = delta18.assign_coords(time = delta18.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
     
-    if verbose : print(f'   bins of width={res} days ({res//365} years)') # type:ignore
-    d18_da_binned = utils.bin_xrDataArray_time(delta18,res=res)
+    if res is not None :
+        if verbose : print(f'   bins of width={res} days ({res//365} years)') # type:ignore
+        delta18 = utils.bin_xrDataArray_time(delta18,res=res)
 
     if countries is not None :
-        d18_da_binned = utils.mask_country_shape(d18_da_binned,buffer_km=buffer_km,country_names=countries)  
+        delta18 = utils.mask_country_shape(delta18,buffer_km=buffer_km,country_names=countries)  
 
     if P :
         if verbose : print('  Loading files for total precipitation info')
@@ -811,16 +817,21 @@ def preprocessed_itrace_data(res=None,
         if include_snow :
             file_snow = utils.load_xarray_datarray(fn_itrace_SNOW)
             precip_da += file_snow.SNOW
-
-        # bin time to match d18_da_binned resolution
-        P_da_binned = utils.bin_xrDataArray_time(precip_da,res=res)
-        P_da_binned = P_da_binned * res * 24 * 3600
+        
+        # set same time unit as delta18
+        precip_da = precip_da.assign_coords(time =('time',timearray))
+        precip_da = precip_da.assign_coords(time = precip_da.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
+        
+        if res is not None :
+            # bin time to match the delta18 resolution
+            precip_da = utils.bin_xrDataArray_time(precip_da,res=res)
+            precip_da = precip_da * res * 24 * 3600 # uniform integration over the bin width
         if countries is not None :
-            P_da_binned = utils.mask_country_shape(P_da_binned,buffer_km=buffer_km,country_names=countries) 
-        d18_P_ds = xr.Dataset({'d18Op':d18_da_binned, 'P': P_da_binned})
+            precip_da = utils.mask_country_shape(precip_da,buffer_km=buffer_km,country_names=countries) 
+        d18_P_ds = xr.Dataset({'d18Op':delta18, 'P': precip_da})
     
     # outputs differ depending on bools P_da, delta18_da... Return df of xrdataarrays.
-    if (not P)&(format=='xr') : return d18_da_binned
+    if (not P)&(format=='xr') : return delta18
     if P&(format=='xr') : return d18_P_ds
     
     if verbose : print('   converting xr to DataFrame (~2 minutes)')
@@ -830,7 +841,7 @@ def preprocessed_itrace_data(res=None,
             print('done')
             return d18_P_df
         else :
-            d18_df = d18_da_binned.to_dataframe(name='d18Op').reset_index().dropna() #type:ignore
+            d18_df = delta18.to_dataframe(name='d18Op').reset_index().dropna() #type:ignore
             print('done')
             return d18_df
 
