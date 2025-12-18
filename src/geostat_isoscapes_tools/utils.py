@@ -5,6 +5,22 @@ import numpy as np
 import shapely 
 from pyproj import CRS
 from scipy.spatial.distance import cdist
+import subprocess
+import os
+
+############################################
+# ROOT DIR RETRIEVAL
+############################################
+def get_project_root():
+    current_file = os.path.abspath(__file__)
+    current_dir = os.path.dirname(current_file)
+    while True:
+        if os.path.exists(os.path.join(current_dir, "pyproject.toml")):
+            return current_dir
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            raise FileNotFoundError("Project root (with pyproject.toml) not found.")
+        current_dir = parent_dir
 
 # =========================================================================================
 # MISC.TOOLS FOR DATA LOADING, BINNING
