@@ -88,14 +88,20 @@ def detrend_multiple_linear_regression(df_to_detrend,
         if 'latabs' in features :
             df['|lat|'] = np.abs(df[lat_col])
             X_cols.append('|lat|')
-        elif 'latquad' in features :
+        if 'latsign' in features : 
+            df['latsign'] = np.sign(df[lat_col])
+            X_cols.append('latsign')
+        if 'latquad' in features :
             df['lat2'] = df[lat_col]**2
             X_cols.append('lat2')
-            X_cols.append(lat_col)
-        elif 'latsqrt' in features :
+            if not (lat_col in X_cols):
+                X_cols.append(lat_col)
+        if 'latsqrt' in features :
             df['sqrt|lat|'] = np.sqrt(np.abs(df[lat_col]))
             X_cols.append('sqrt|lat|')
-            
+        if 'latReLU' in features : 
+            df['latReLU'] = np.maximum(0,df[lat_col]) # ReLU -> to create asymetric PW linear activation
+            X_cols.append('latReLU')
     if 'lon' in features:
         X_cols.append(lon_col)
     if 'ele' in features:
@@ -108,11 +114,9 @@ def detrend_multiple_linear_regression(df_to_detrend,
     # Check that at least one predictor is included
     if len(X_cols)==0:
         raise ValueError('Must set at least one of the include_xxx parameters to True!')
-
     X = df[X_cols].values
     y = df[value_col].values
     
-    # print('The predictors are ', X_cols)
     result_dict = fit_multiple_linear_model(X, y,X_cols)
 
     # beta = result_dict['parameters']
@@ -142,6 +146,7 @@ def fit_multiple_linear_model(X, y,predictors):
     
     # r2 and adjusted r2
     y_pred = model_full.fittedvalues
+    y_res = y-y_pred
     mae = np.mean(np.abs(y - y_pred))
     sst = np.sum((y - y.mean())**2)
     full_r2 = 1- ssr_full/sst
@@ -164,11 +169,13 @@ def fit_multiple_linear_model(X, y,predictors):
        
     # dict of results 
     result_dict = {'parameters':dict(zip(["intercept"] + predictors,beta_full)),
-                   'y_pred':list(y_pred),
-                   'mae':mae,
+                   'y_pred':list(np.array(y_pred,dtype=float)),
+                   'y_res': list(np.array(y_res,dtype=float)),
+                   'y' : list(np.array(y,dtype=float)),
+                   'mae':float(mae),
                    'parameters_std': coefficient_std,
-                   'r2':full_r2,
-                   'adj_r2': adj_r2,
+                   'r2':float(full_r2),
+                   'adj_r2': float(adj_r2),
                    'partial r2': partial_r2,
                    'p':p_values,
                    }
@@ -183,7 +190,7 @@ def fit_multiple_linear_model(X, y,predictors):
 
 def multiple_linear_result_dict_to_df(result_dict):
     """ TODO
-    for printing results (df is printed more nicely)
+    for printing results (df is printed more nicely than a dict)
     """
     res_df = pd.DataFrame({
                     "name": result_dict['parameters_std'].keys(),
@@ -213,6 +220,7 @@ def trend_removal(trend: str | None,df : pd.DataFrame,quantity : str, verbose: b
     
     elif 'multiple_linear' in trend:
         # Remove trend by fitting a multilinear trend based on possibly many predictors : latitude (by default), elevation...
+        if verbose : print(f'trend to model : {trend}')
         df_detrended, results = detrend_multiple_linear_regression(df,
                                                                 value_col=quantity,
                                                                 lat_col = lat,
@@ -502,22 +510,20 @@ def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
         df["y"]=ys
 
         # Add exog variables
-        df_cols= list(df.columns)
         if (trend is not None):
             if (exog_df is None) :
                 if 'multiple_linear' in str(trend) :
                     variables = trend.split('_') #type:ignore
                     variables = [v for v in variables if v in ['ele','D']]
-                    cols_exog = variables.copy()
+                    cols_exog = np.unique(np.array(variables)).tolist()
                     cols_exog.extend([lat,lon])
                     exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon,verbose=False)[cols_exog]
-
             df = df.merge(exog_df,on=[lat,lon]) # type:ignore
             df = df.dropna(axis=0) # removes locs where exog data was not available
         
         # If specified : fit and remove trend here instead of inside variogram_with_gstat
         if (trend is not None) & (mask is not None) and (trend_before_masking) :
-            if verbose : print('   removing trend using all available locations.')
+            if verbose : print(f'   removing trend {trend} using all available locations.')
             df['resid'],dict_trend = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon)
             trend_results[str(t)] = dict_trend
             quantity = 'resid'
@@ -624,11 +630,21 @@ def iterate_and_aggregate_variograms(data_ds : xr.DataArray | xr.Dataset,
     if verbose : print('Aggregate variograms')
     df_all = aggregate_variograms(bin_counts=bin_count,gammas=gammas,bins=ref_bins)
     # save results
-    if config_dict['direction'] is not None : # add info on direction in file names
-        fp+=f"d{str(config_dict['direction'])}"
+    # if config_dict['direction'] is not None : # add info on direction in file names
+    #     fp+=f"d{str(config_dict['direction'])}"
     
-    df_all.to_csv(f'{fp}vario_df.csv')
-    with open(f'{fp}trend_metrics.json', 'w') as f:
+    df_all.to_csv(f'{fp}vario_{config_dict["direction"]}_df.csv')
+    with open(f'{fp}trend_metrics{config_dict["direction"]}.json', 'w') as f:
+    #     for key,value in results_dict.items():
+    #         print(key)
+    #         print(type(value))
+    #         if type(value)==dict:
+    #             for k,v in value.items():
+    #                 print('  ',k)
+    #                 print('  ',type(v))
+    #                 if type(v)==list:
+    #                     print('      ',type(v[0]))
+    #         print('----')
         json.dump(results_dict, f)
     print(f'outputs saved in folder {fp}, files vario_df.csv and trend_metrics.json')
 
@@ -719,7 +735,7 @@ def make_fitted_model_func(f,*args,**kwargs):
 # KRIGING
 # =============================================
 def get_sisal_data_for_kriging(res : int = 200, 
-                               temp_ds_fn : str = '../data/temperature/temp_800ka_ann.nc',
+                               temp_ds_fn : str = '/data/temperature/temp_800ka_ann.nc',
                                countries : list | None = ['China'],
                                buffer_km : float = 500,
                                conversion : str = 'd18Op_VSMOW_exactconv',
@@ -730,7 +746,7 @@ def get_sisal_data_for_kriging(res : int = 200,
     data_df = sisal_utils.get_basic_cleaned_merged_sisal_data(verbose=verbose)
 
     # load temperature dataset
-    temp_xda = utils.load_xarray_datarray(temp_ds_fn).temp
+    temp_xda = utils.load_xarray_datarray(utils.get_project_root()+temp_ds_fn).temp
 
     # compute converted data
     data_df_drip_water = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',verbose=verbose)
@@ -750,7 +766,7 @@ def get_sisal_data_for_kriging(res : int = 200,
     return data_df_drip_water
 
 def get_preprocessed_itrace_data(res=None,
-                            data_folder = '../data/modern/iTrace/',
+                            data_folder = '/data/modern/iTrace/',
                             sim_prefix = 'b.e13.Bi1850C5.f19_g16',
                             sim_kyr = 12,
                             sim_forcings = 'ice_ghg_orb_wtr',
@@ -764,13 +780,14 @@ def get_preprocessed_itrace_data(res=None,
                             format : str = 'df',
                             verbose : bool = True) :
     """ TODO 
-    res : in ***days***
+    res : in ***MONTHS***
     format : df or xr
     P = precip quantity
     """
     print('loading itrace files')
     # files to find and read :
-    fn_merged = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
+    rootdir = utils.get_project_root()
+    fn_merged = rootdir+f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
     fn_itrace_RAIN_H218O = f'{fn_merged}.RAIN_H218O.{sim_suffix}.nc'
     fn_itrace_RAIN_H2OTR = f'{fn_merged}.RAIN_H2OTR.{sim_suffix}.nc'
     fn_itrace_RAIN = f'{fn_merged}.RAIN.{sim_suffix}.nc'
@@ -814,6 +831,7 @@ def get_preprocessed_itrace_data(res=None,
         # load netcdf files 
         file_rain = utils.load_xarray_datarray(fn_itrace_RAIN)
         precip_da = file_rain.RAIN
+        if verbose : print(f'   rain file info : {precip_da.attrs}')
         if include_snow :
             file_snow = utils.load_xarray_datarray(fn_itrace_SNOW)
             precip_da += file_snow.SNOW
@@ -821,11 +839,13 @@ def get_preprocessed_itrace_data(res=None,
         # set same time unit as delta18
         precip_da = precip_da.assign_coords(time =('time',timearray))
         precip_da = precip_da.assign_coords(time = precip_da.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
-        
+        precip_da = precip_da * 32 * 24 * 3600 # integrate over bin width (natural binwidth is 31 days)
+
         if res is not None :
             # bin time to match the delta18 resolution
             precip_da = utils.bin_xrDataArray_time(precip_da,res=res)
-            precip_da = precip_da * res * 24 * 3600 # uniform integration over the bin width
+            precip_da = precip_da * res # uniform integration over the bin width
+
         if countries is not None :
             precip_da = utils.mask_country_shape(precip_da,buffer_km=buffer_km,country_names=countries) 
         d18_P_ds = xr.Dataset({'d18Op':delta18, 'P': precip_da})
@@ -853,8 +873,8 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
                                         variables : list[str]=['ele','D'],
                                         lat = 'lat',
                                         lon = 'lon',
-                                        dem_file : str = "../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",
-                                        coast_shapefile : str = "../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",
+                                        dem_file : str = "/data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",
+                                        coast_shapefile : str = "/data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",
                                         verbose : bool = False):
     if verbose : print(f'-> Adding external variables {variables}.')
     df = df_orig.copy()
@@ -873,7 +893,7 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
         df = compute_distance_to_coast(df,coast_shapefile,lat=lat,lon=lon)
     return df
 
-def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="../data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",lat='lat',lon='lon'):
+def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="/data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",lat='lat',lon='lon'):
     """ TODO 
     lat : -90 to 90
     lon : -180 to 180
@@ -885,7 +905,7 @@ def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="..
         df[lat]=utils.convert_lat_0_180_to_neg90_90(np.array(df[lat]))
 
     # Load global elevation grid (ETOPO for instance)
-    ds = xr.open_dataset(dem_file,engine='netcdf4') # ds must have lat/lon coords and z variable
+    ds = xr.open_dataset(utils.get_project_root()+dem_file,engine='netcdf4') # ds must have lat/lon coords and z variable
     lats_dem = ds[lat].values
     lons_dem = ds[lon].values
     elevation_grid = ds['z'].values
@@ -911,7 +931,7 @@ def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="..
     
     return df
 
-def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",lat='lat',lon='lon'):
+def compute_distance_to_coast(df_latlon, coast_shp_path="/data/shapefiles/ne_10m_coastline/ne_10m_coastline.shp",lat='lat',lon='lon'):
     """
     Add geodesic distance to nearest coastline (in meters) to a dataframe 
     containing columns lat and lon.
@@ -930,7 +950,7 @@ def compute_distance_to_coast(df_latlon, coast_shp_path="../data/shapefiles/ne_1
     if any(df[lat]>90):
         df[lat] = utils.convert_lat_0_180_to_neg90_90(df[lat].values)
     
-    coast = gpd.read_file(coast_shp_path).to_crs("EPSG:4326")
+    coast = gpd.read_file(utils.get_project_root()+coast_shp_path).to_crs("EPSG:4326")
 
     geod = Geod(ellps="WGS84")
 

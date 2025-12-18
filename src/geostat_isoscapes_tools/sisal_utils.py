@@ -4,7 +4,7 @@ import os
 from xarray import DataArray
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np
-
+from . import utils
 # =============================================================
 # Useful functions and constants for handling SISAL data 
 # =============================================================
@@ -83,7 +83,8 @@ def load_sisal():
     '''
     # read sisalv3.csv files
     cwd = os.getcwd()
-    os.chdir("../data/sisalv3_csv")
+    proj_root_dir = utils.get_project_root()
+    os.chdir(proj_root_dir+"/data/sisalv3_csv")
 
     entity_df = pd.read_csv('entity.csv')
     d18O_df   = pd.read_csv("d18O.csv")

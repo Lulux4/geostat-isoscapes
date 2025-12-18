@@ -51,7 +51,10 @@ def plot_isoscape_latlon_platecarree_df(
         df,
         time: str = '',
         title: str = "Values of d18O",
-        countries_borders: bool = False
+        countries_borders: bool = False,
+        lat_col :str = 'lat',
+        lon_col :str = 'lon',
+        qty_col :str = 'd18Op'
     ):
     """
     Plot the given dataframe with columns: lat, lon, d18O on PlateCarree projection.
@@ -61,16 +64,16 @@ def plot_isoscape_latlon_platecarree_df(
 
     # Scatter plot of irregular points
     sc = ax.scatter(
-        df["lon"],
-        df["lat"],
-        c=df["d18O"],
+        df[lon_col],
+        df[lat_col],
+        c=df[qty_col],
         cmap="viridis",
         transform=ccrs.PlateCarree(),
         s=20,
         edgecolor="none"
     )
 
-    cbar = plt.colorbar(sc, ax=ax, label="d18O")
+    cbar = plt.colorbar(sc, ax=ax, label=qty_col)
     if countries_borders:
         country_borders = cfeature.NaturalEarthFeature(
             category='cultural',
@@ -80,12 +83,12 @@ def plot_isoscape_latlon_platecarree_df(
         )
         ax.add_feature(country_borders, edgecolor='gray') # type:ignore
     ax.coastlines() # type:ignore
-    valid = df.dropna(subset=["lat", "lon", "d18O"])
+    valid = df.dropna(subset=[lat_col, lon_col, qty_col])
     ax.set_extent([         #type:ignore
-        valid["lon"].min(),
-        valid["lon"].max(),
-        valid["lat"].min(),
-        valid["lat"].max()
+        valid[lon_col].min(),
+        valid[lon_col].max(),
+        valid[lat_col].min(),
+        valid[lat_col].max()
     ], crs=ccrs.PlateCarree())
     ax.set_title(f"{title} - {time}")
 
