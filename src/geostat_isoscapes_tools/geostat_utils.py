@@ -403,8 +403,8 @@ def get_weights_from_pair_counts(pair_counts: np.ndarray) -> np.ndarray :
 def get_vario_parameters_dict(parameters):
     # retrieve the model parameters and give them the correct name:
     if len(parameters) == 3:
-        range_, sill, nugget = parameters
-        return {'range':range_,'sill':sill,'nugget':nugget}
+        range_, sill_ln, nugget_ln = parameters
+        return {'range':range_,'sill':np.exp(sill_ln),'nugget':np.exp(nugget_ln)}
     else:
         print('Parameters are ',parameters)
         raise NotImplementedError('TODO : implement parameters retrieval for this case')
@@ -669,7 +669,7 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
             Lag distances
         - gammas : array
             Semivariances
-        - model : str
+        - model_name : str
             'spherical', 'exponential', 'gaussian', or 'composite'
         - initial_params : list or None
             Starting guess for parameters
@@ -686,28 +686,18 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
         - pcov : ndarray
             Covariance matrix of the fit
     """
-
-    # model_dict = {
-    #     'spherical': (spherical_model, ['sill', 'range', 'nugget']),
-    #     'exponential': (exponential_model, ['sill', 'range', 'nugget']),
-    #     'gaussian': (gaussian_model, ['sill', 'range', 'nugget']),
-    #     'composite': (composite_model, ['sill1', 'range1', 'sill2', 'range2', 'nugget'])
-    # }
-
-    # func, param_names = model_dict[model]
     model = variogram_models.define_model(model_name)
     func = model.get_model_func()
     param_names = model.params
 
     if initial_params is None:
-        sill_guess = np.nanmax(gammas)
+        sill_ln_guess = np.nanmax(gammas)
         range_guess = np.nanmax(bins) / 3
-        nugget_guess = gammas[0]
+        nugget_ln_guess = np.log(gammas[0])
         if '+' in model_name:
-            initial_params = [nugget_guess,range_guess, sill_guess/2,range_guess*2, sill_guess/2]
+            initial_params = [nugget_ln_guess,range_guess, sill_ln_guess/2,range_guess*2, sill_ln_guess/2]
         else:
-            initial_params = [range_guess,sill_guess, nugget_guess]
-
+            initial_params = [range_guess,sill_ln_guess, nugget_ln_guess]
     if pair_counts is not None:
         pair_counts = np.asarray(pair_counts)
         # Weights proportional to sqrt(N) => sigma = 1 / sqrt(N) => curve_fit minimizes residual*sqrt(N)

@@ -162,15 +162,15 @@ def plot_variogram_from_bins_and_gamma(centers,
         
         if (not ('+' in model_name)) and (model_params is not None) :
             range_ = model_params['range']
-            sill = model_params['sill']+model_params['nugget']
-            nugget = model_params['nugget']
+            nugget =np.exp(model_params['nugget_ln'])
+            sill = np.exp(model_params['sill_ln'])+nugget
             ax.vlines(range_,0,max(gamma),color="#FF1E00",linestyle='--',alpha=0.2,label=f"range")
             ax.hlines(sill,0,max(centers),color="#BD6D12",linestyle='--',alpha=0.2,label=f"sill")
         
         elif ('+' in model_name) and (model_params is not None) :
             range_ = gutils.effective_range(centers,model_fct,0.95)
-            sill = model_params['sill1']+model_params['sill2']+model_params['nugget']
-            nugget= model_params['nugget']
+            nugget= np.exp(model_params['nugget_ln'])
+            sill = np.exp(model_params['sill1'])+np.exp(model_params['sill2'])+nugget
             ax.vlines(range_,0,max(gamma),color='#FF1E00',linestyle='--',alpha=0.2,label=f'effective range')
             ax.hlines(sill,0,max(centers),color='#BD6D12',linestyle='--',alpha=0.2,label=f"total sill")
         if (range_ is not None) & (sill is not None) & (nugget is not None):
