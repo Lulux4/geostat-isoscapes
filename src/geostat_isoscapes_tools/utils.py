@@ -34,7 +34,7 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     ''' This function bins a pandas Series according to the given bin width.
     It returns the binned Series.
     The values in this series are the bins label, which is defined as the lower bound of the bin range. 
-    E.g : bin "0" spans from 0 to 0+width.
+    E.g : bin "0" spans [0,0+width[.
     Inputs :
         - series : pd.Series containing float values to bin
         - bin_width : integer of the desired bin width 
@@ -42,7 +42,7 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
         - binned_series : pd.Series containing the bin label associated of each item. 
     '''
     bins = list(range(int(series.min()), int(series.max())+ bin_width + 1, bin_width))
-    binned_series = pd.cut(series, bins, labels = bins[:-1])
+    binned_series = pd.cut(series, bins, labels = bins[:-1],right=False)
     return binned_series
 
 def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray : 
@@ -54,10 +54,10 @@ def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray :
     da_binned = da_binned.rename({'time_bins': 'time'})
     return da_binned.assign_coords(time=bins[:-1])
 
-def get_yrBP_from_itrace_time(months_after_start : int, start_year : float = 12001)->float:
+def get_yrBP_from_itrace_time(months_after_start : int | pd.Series, start_year : float = 12001)->float:
     """ Retrieve the year (+decimals) depending on a start year in yr BP (positive number) and the number of months spent since this start year.
     """
-    return -( -start_year + months_after_start/12)
+    return -( -start_year + months_after_start/12) # type:ignore
 
 # =============================================================================================
 # "Spatial" computations
@@ -192,9 +192,9 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
         mask = xr.DataArray(mask2d,
                             dims=(lat_name, lon_name),
                             coords={lat_name: data_to_mask[lat_name], lon_name: data_to_mask[lon_name]},
-                        ).expand_dims(time=data_to_mask.time)
+                        )#.expand_dims(time=data_to_mask.time)
         if verbose : print('> done')
-        return data_to_mask.where(mask), mask
+        return data_to_mask.where(mask.expand_dims(time=data_to_mask.time)), mask
 
 
 def apply_spatial_mask(df, spatial_mask, lat='lat', lon='lon',mask_col='mask'):

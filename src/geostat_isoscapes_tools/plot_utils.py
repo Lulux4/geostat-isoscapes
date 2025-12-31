@@ -131,6 +131,8 @@ def plot_variogram_from_bins_and_gamma(centers,
                                        model_fct = None,
                                        model_params = None,
                                        figsize: tuple[int,int]=(10,5),
+                                       textbox_loc = (0.835, 0.22),
+                                       legend_loc='lower right',
                                        ax_ = None,
                                        save_name : str | None = None,
                                        verbose : bool =  False
@@ -179,14 +181,14 @@ def plot_variogram_from_bins_and_gamma(centers,
                 weights = gutils.get_weights_from_pair_counts(counts)
             r2 = utils.compute_r2(gamma, model_fct(centers), weights=weights)
             textstr = f"Range: {range_:.2e} m\nSill: {sill:.2f} ‰²\nNugget: {nugget:.2f} ‰²\nR²: {r2:.2f}"
-            ax.text(0.835, 0.22, textstr,
+            ax.text(textbox_loc[0],textbox_loc[1], textstr,
                     transform=ax.transAxes,
                     fontsize=10,
                     verticalalignment='bottom',
                     horizontalalignment='left',
                     bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.8)
                     )
-        if ax_ is None : plt.legend(loc='lower right')
+        if ax_ is None : plt.legend(loc=legend_loc)
     
     width = centers[1]-centers[0]
     # Overlay bins counts if given
@@ -261,7 +263,10 @@ def plot_global_map(data:pd.DataFrame,
                     symbol : str ='square',
                     size : int =10,
                     lon_col : str = 'longitude',
-                    lat_col : str = 'latitude')-> go.Figure:
+                    lat_col : str = 'latitude',
+                    colorscale : str ='plasma',
+                    landcolor="#fffafa",
+                    oceancolor="#83d0f1")-> go.Figure:
     ''' 3D or flat earth (natural earth proj)
     If proj=True : 2D 
     else : 3D
@@ -276,7 +281,7 @@ def plot_global_map(data:pd.DataFrame,
             symbol=symbol,
             size=size,
             color=data[quantity_col],
-            colorscale='plasma',
+            colorscale=colorscale,
             # cmin=-15.5,
             # cmax=0,
             opacity=0.7,
@@ -294,9 +299,9 @@ def plot_global_map(data:pd.DataFrame,
             geo=dict(
                 projection=dict(type="natural earth"),
                 showland=True,
-                landcolor="#fffafa",
+                landcolor=landcolor,
                 showocean=True,
-                oceancolor="#83d0f1",
+                oceancolor=oceancolor,
                 showcountries=True,
                 showcoastlines=True,
                 showframe=False,
@@ -308,9 +313,9 @@ def plot_global_map(data:pd.DataFrame,
             geo=dict(
                 projection=dict(type="orthographic", rotation=dict(lat=12, lon=0)),
                 showland=True,
-                landcolor="#f0f0f0",
+                landcolor=landcolor,
                 showocean=True,
-                oceancolor="#def4fd",
+                oceancolor=oceancolor,
                 showcountries=True,
                 showcoastlines=False,
                 showframe=False

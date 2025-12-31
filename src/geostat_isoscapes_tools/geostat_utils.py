@@ -119,9 +119,10 @@ def detrend_multiple_linear_regression(df_to_detrend,
     
     result_dict = fit_multiple_linear_model(X, y,X_cols)
 
-    # beta = result_dict['parameters']
-    # df['trend'] = beta[0] + X @ beta[1:] 
-    df['trend'] = result_dict['y_pred']
+    beta = result_dict['parameters']
+
+    df['trend'] = beta['intercept'] + X @ np.array(list(beta.values()))[1:] 
+    # df['trend'] = result_dict['y_pred']
     df['residual'] = y - df['trend'].values
 
     return df, result_dict
@@ -169,9 +170,9 @@ def fit_multiple_linear_model(X, y,predictors):
        
     # dict of results 
     result_dict = {'parameters':dict(zip(["intercept"] + predictors,beta_full)),
-                   'y_pred':list(np.array(y_pred,dtype=float)),
-                   'y_res': list(np.array(y_res,dtype=float)),
-                   'y' : list(np.array(y,dtype=float)),
+                #    'y_pred':list(np.array(y_pred,dtype=float)),
+                #    'y_res': list(np.array(y_res,dtype=float)),
+                #    'y' : list(np.array(y,dtype=float)),
                    'mae':float(mae),
                    'parameters_std': coefficient_std,
                    'r2':float(full_r2),
@@ -400,11 +401,15 @@ def get_weights_from_pair_counts(pair_counts: np.ndarray) -> np.ndarray :
     weights[~mask_nans] = np.sqrt(pair_counts[~mask_nans])
     return weights
 
-def get_vario_parameters_dict(parameters):
-    # retrieve the model parameters and give them the correct name:
+def get_gstatvario_params_dict(parameters):
+    """ Given the parameters object of a gstat variogram (typically : V.parameters),
+        it retrieves the model parameters and give them the correct name. It stores the sill and nugget 
+        in log scale since the plotting function requires this (due to the locally defined models in log scale).
+        /!/ USE ONLY WITH A SINGLE GSTAT V.PARAMETERS OBJECT /!/
+    """
     if len(parameters) == 3:
-        range_, sill_ln, nugget_ln = parameters
-        return {'range':range_,'sill':np.exp(sill_ln),'nugget':np.exp(nugget_ln)}
+        range_, sill, nugget = parameters
+        return {'range':range_,'sill_ln':np.log(sill),'nugget_ln':np.log(nugget)}
     else:
         print('Parameters are ',parameters)
         raise NotImplementedError('TODO : implement parameters retrieval for this case')
@@ -450,7 +455,7 @@ def get_vario_parameters_dict(parameters):
 #     print('finished loop') 
 #     return bin_counts, gammas, ref_bins
 
-def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
+def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataFrame,
                                     quantity : str ="d18Op",
                                     ref_bins : np.ndarray | None =None,
                                     direction : float | None = None,
@@ -462,6 +467,7 @@ def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
                                     trend_before_masking : bool = True,
                                     lat: str = 'lat',
                                     lon : str ='lon',
+                                    const_coords : bool = False,
                                     verbose : bool =False):
     """
     Vario computation looping over an xarray dataset.
@@ -477,34 +483,49 @@ def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
         mask : xr datarray with lat lon and time dims, used to mask some locations or times.
         trend_before_masking : bool, specifies if trend removal should be applied before masking (True) or after (False).
         verbose: bool, sets the verbosity of the function
+        const_coords : bool ,if True we do not recompute the coordinates projection at each iteration (saves time).
     """
     quantity_tmp = quantity
     trend_tmp = trend
-    xs, ys, lons, lats, exog_df,trend_results = None,None,None,None,None,{}
+    xs, ys,exog_df,trend_results = None,None,None,{}
     bin_counts, gammas = [], []
 
     for v in [lon, lat, quantity]:
-        if v not in ds:
+        if v not in data:
             raise ValueError(f"Dataset must contain a '{v}' variable.")
-
-    for t, ds_t in tqdm(ds.groupby("time")):
-        # Convert to DataFrame
-        df = ds_t.to_dataframe().reset_index()
+    
+    if isinstance(data, pd.DataFrame):
+        tqdm_it = tqdm(data.groupby("time",observed=True))
+    else : 
+        tqdm_it = tqdm(data.groupby("time"))
+    
+    for t, data_t in tqdm_it:
+        # Convert to DataFrame if needed
+        if (type(data_t)==xr.Dataset)| (type(data_t)==xr.DataArray) :
+            df = data_t.to_dataframe().dropna().reset_index() #type:ignore
+        elif isinstance(data, pd.DataFrame):
+            df = data_t
+        if type(df) is not pd.DataFrame : 
+            raise TypeError('data is not of type xr.DataArray, xr.Dataset or pd.DataFrame!')
+        
+        # If site_name is in df (sisal data), aggregate df by site_name to get only one value per site (mean value)
+        if 'site_id' in df.columns:
+            df = df.groupby('site_id').agg({lon:'first',lat:'first',quantity:'mean'})
         
         # Convert lat lon ranges :
-        if any(df[lon]>180) & (lons is None):
+        if any(df[lon]>180):
             lons = utils.convert_lon_0_360_to_neg180_180(np.array(df[lon]))
-        if any(df[lat]>90) & (lats is None):
+            df[lon]=lons
+        if any(df[lat]>90):
             lats= utils.convert_lat_0_180_to_neg90_90(np.array(df[lat]))
-        if any(df[lon]>180): df[lon]=lons
-        if any(df[lat]>90): df[lat]=lats
+            df[lat]=lats
 
         # Skip if not enough data
         if df[quantity].notna().sum() < 30:
             continue
 
         # Compute projected coordinates
-        if (xs is None)&(ys is None):
+        if ((xs is None)&(ys is None)&(const_coords is True)) | (not const_coords):
             xs,ys = project_coords(df[lon].values,df[lat].values,epsg="EPSG:3857")
         df["x"]=xs
         df["y"]=ys
@@ -519,10 +540,10 @@ def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
                     cols_exog.extend([lat,lon])
                     exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon,verbose=False)[cols_exog]
             df = df.merge(exog_df,on=[lat,lon]) # type:ignore
-            df = df.dropna(axis=0) # removes locs where exog data was not available
-        
+            df = df.dropna(axis=0) # clean nans that come from exog variables
+
         # If specified : fit and remove trend here instead of inside variogram_with_gstat
-        if (trend is not None) & (mask is not None) and (trend_before_masking) :
+        if (trend is not None) and (trend_before_masking) :
             if verbose : print(f'   removing trend {trend} using all available locations.')
             df['resid'],dict_trend = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon)
             trend_results[str(t)] = dict_trend
@@ -540,7 +561,7 @@ def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
             df = utils.apply_spatial_mask(df,mask,lat,lon,'mask')
                 
         try:
-            if verbose : print(f'   computing semivariances of the {quantity}')
+            if verbose : print(f'   computing semivariances of the {quantity}, df has length {len(df)}')
             if ref_bins is None:
                 b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type: ignore
                                                             quantity=quantity,
@@ -570,10 +591,14 @@ def iterative_variogram_computations(ds : xr.DataArray | xr.Dataset,
 
             bin_counts.append(bin_count)
             gammas.append(g_exp)
-            quantity = quantity_tmp
-            trend  = trend_tmp
+            
         except Exception as e:
-            raise e
+            print('/!/ ERROR /!/')
+            print(e)
+            print('--> skipping this iteration')
+        
+        quantity = quantity_tmp
+        trend  = trend_tmp
 
     return bin_counts, gammas, ref_bins, trend_results
 
@@ -592,7 +617,7 @@ def aggregate_variograms(bin_counts,gammas,bins):
     df = pd.DataFrame({'lag':bins_mask, 'gamma':weighted_mean_gamma_mask, 'count':total_counts_mask})
     return df
 
-def iterate_and_aggregate_variograms(data_ds : xr.DataArray | xr.Dataset,
+def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataFrame,
                                      fp : str,
                                      config_dict : dict, 
                                      mask_pts : pd.DataFrame | None = None,
@@ -603,17 +628,21 @@ def iterate_and_aggregate_variograms(data_ds : xr.DataArray | xr.Dataset,
     mask_df = None
     if mask_pts is not None :
         if verbose : print('Defining spatial mask around anchor points')
-        _, mask_da = utils.mask_union_of_circles_around_pts(data_to_mask=data_ds,
-                                                            df_ref_pts=mask_pts,
-                                                            radius_km=config_dict['mask radius [km]'],
-                                                            lat_name=data_cols['lat'],
-                                                            lon_name=data_cols['lon'],
-                                                            verbose = verbose) # type:ignore
-        mask_df = mask_da.to_dataframe(name='mask').reset_index().dropna()[['lon','lat','mask']].drop_duplicates() #type:ignore
-        
+        _, mask = utils.mask_union_of_circles_around_pts(data_to_mask=data,
+                                                        df_ref_pts=mask_pts,
+                                                        radius_km=config_dict['mask radius [km]'],
+                                                        lat_name=data_cols['lat'],
+                                                        lon_name=data_cols['lon'],
+                                                        verbose = verbose) # type:ignore
+        if type(mask) == xr.DataArray :
+            if verbose : print('> converting mask of shape', mask.shape, 'to dataframe')
+            mask_df = mask.to_dataframe(name='mask').reset_index().dropna()[['lon','lat','mask']].drop_duplicates() #type:ignore
+            if verbose : print('> done')
+        elif type(mask) == pd.DataFrame :
+            mask_df = mask
     # Loop over the different time slices to compute the each variogram
     if verbose : print('Start variogram computation iterations')
-    bin_count,gammas, ref_bins, results_dict = iterative_variogram_computations(data_ds,
+    bin_count,gammas, ref_bins, results_dict = iterative_variogram_computations(data,
                                                                                 quantity = data_cols['quantity'],
                                                                                 trend = config_dict['trend'],
                                                                                 maxlag = config_dict['maxlag'],
@@ -625,7 +654,8 @@ def iterate_and_aggregate_variograms(data_ds : xr.DataArray | xr.Dataset,
                                                                                 trend_before_masking = config_dict['trend_before_mask'],
                                                                                 lat = data_cols['lat'],
                                                                                 lon = data_cols['lon'],
-                                                                                verbose=verbose)
+                                                                                verbose=verbose,
+                                                                                const_coords=config_dict['const_coords'])
     # aggregate semivariances
     if verbose : print('Aggregate variograms')
     df_all = aggregate_variograms(bin_counts=bin_count,gammas=gammas,bins=ref_bins)
@@ -724,36 +754,35 @@ def make_fitted_model_func(f,*args,**kwargs):
 # =============================================
 # KRIGING
 # =============================================
-def get_sisal_data_for_kriging(res : int = 200, 
+def get_sisal_data_for_kriging(res : int | None = 200, 
                                temp_ds_fn : str = '/data/temperature/temp_800ka_ann.nc',
                                countries : list | None = ['China'],
                                buffer_km : float = 500,
-                               conversion : str = 'd18Op_VSMOW_exactconv',
+                               conversion : str | None = 'd18Op_VSMOW_exactconv',
                                verbose : bool = True):
     """ Load SISAL data, sanatize it, convert it to drip water equivalents, sclice at the desired temporal resolution (in years!) .
     """
     print('loading sisal data')
     data_df = sisal_utils.get_basic_cleaned_merged_sisal_data(verbose=verbose)
 
-    # load temperature dataset
-    temp_xda = utils.load_xarray_datarray(utils.get_project_root()+temp_ds_fn).temp
-
-    # compute converted data
-    data_df_drip_water = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',verbose=verbose)
-    # remove samples for which the conversion failed (usually due to T retrieval failure)
-    data_df_drip_water = data_df_drip_water.dropna(subset=conversion)
+    # convert data if needed
+    if conversion is not None :
+        # load temperature dataset
+        temp_xda = utils.load_xarray_datarray(utils.get_project_root()+temp_ds_fn).temp
+        data_df = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',verbose=verbose)
+        # remove samples for which the conversion failed (usually due to T retrieval failure)
+        data_df = data_df.dropna(subset=conversion)
 
     # Bin years to the desired temporal resolution
-    chrono_series = data_df_drip_water['age'].copy()
-    data_df_drip_water['binned_age'] = utils.slice_in_equal_bins(chrono_series,res)
+    if res is not None :
+        data_df['binned_age'] = utils.slice_in_equal_bins(data_df['age'].copy(),res)
     
-    data_df_drip_water = data_df_drip_water.rename(columns={'latitude':'lat','longitude':'lon'})
+    data_df = data_df.rename(columns={'latitude':'lat','longitude':'lon'})
     if countries is not None :
-        data_df_drip_water = utils.mask_country_shape(data_df_drip_water,buffer_km=buffer_km,country_names=countries)
+        data_df = utils.mask_country_shape(data_df,buffer_km=buffer_km,country_names=countries)
 
-    # data_ready = data_df_drip_water.rename(columns={'lat':'latitude','lon':'longitude'}) # type:ignore
     print('sisal dataframe is ready')
-    return data_df_drip_water
+    return data_df
 
 def get_preprocessed_itrace_data(res=None,
                             data_folder = '/data/modern/iTrace/',
@@ -810,7 +839,7 @@ def get_preprocessed_itrace_data(res=None,
     delta18 = delta18.assign_coords(time = delta18.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
     
     if res is not None :
-        if verbose : print(f'   bins of width={res} days ({res//365} years)') # type:ignore
+        if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
         delta18 = utils.bin_xrDataArray_time(delta18,res=res)
 
     if countries is not None :
