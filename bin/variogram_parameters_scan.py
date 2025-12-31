@@ -3,123 +3,159 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd 
 import os 
+import itertools
 sns.set_style('dark')
 
 ###############################################
 # Define parameters to apply successively
 ###############################################
-
+# WHICH DATASET DO YOU WANT TO PROCESS ?
+sisal = False
+itrace = True
+# DEFINE THE PARAMS :
 trends = [
-    'multiple_linear_latabs_latReLU',
-    'multiple_linear_latabs_latReLU_P',
+    # 'multiple_linear_ele_D',
+    # 'multiple_linear_D',    
+    # 'multiple_linear_latabs_latReLU',
+    # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_D',
     'multiple_linear_latabs_latReLU_ele',
-    'multiple_linear_latabs_latReLU_P_D',
-    'multiple_linear_latabs_latReLU_ele_P',
+    'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_ele_D',
-    'multiple_linear_latabs_latReLU_ele_P_D'
+    'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
     ]
 
 azimuths = [None] # 0 45 90 180
 
-# Config
-params = {
-        # 'trend': 'xxxxxx' to be set in the loop 
+sims = {'12':{'num':'05','suffix':'800001-899912'},
+        '16':{'num':'01','suffix':'400001-499912'},
+        '20':{'num':'01','suffix':'100001-199912'}
+        }
+
+res_months = 1
+verbose = False
+countries = None 
+model_name = 'spherical'
+
+# Load sisal data only one time unless we want to loop on resolution
+res_sisal = 12
+sisal_df = gutils.get_sisal_data_for_kriging(res=int(res_sisal/12),countries=countries,verbose=verbose)
+
+# Define name of cols 
+data_cols = {'lat':'lat',
+            'lon':'lon',
+            'quantity':'d18Op'}
+cols_sisal = ['binned_age','lat','lon','site_id','d18Op_VSMOW_exactconv']
+
+# Prepare the iterations ###############################
+iters = itertools.product(sims.keys(),trends,azimuths)
+tmp_kyr = None
+
+for kyr,trend,azimuth in iters :
+    print('=====================================================================')
+    print(f'Time={kyr} kyr BP, trend={trend}, direction={azimuth}')
+    print('=====================================================================')
+    # COMFIGURATION ####################################
+    sisal_params = {
         'trend_before_mask': True,
         'maxlag': 1.2e7,
         'nlags': 20,
         'centers': None,
+        'trend':trend,
         'tolerance' : 22.5,
-        'model_name' : 'spherical',
+        'model_name' : model_name,
         'mask radius [km]': 1000,
-        'res [months]': 12*200,
-        'Itrace simulation spec' : {'time':'20kyrBP',},
-        'countries':None
-        }
-data_cols = {'lat':'lat',
-            'lon':'lon',
-            'quantity':'d18Op'}
+        'res [months]': res_months,
+        'direction': azimuth,
+        'countries':None,
+        'const_coords':False,}
+    
+    itrace_params = sisal_params.copy()
+    itrace_params['Itrace simulation spec'] = { 'kyr': kyr,                   
+                                                'num': sims[kyr]['num'],                
+                                                'model':'clm2.h0',
+                                                'forcings':'ice_ghg_orb_wtr',   
+                                                'suffix': sims[kyr]['suffix'], 
+                                                'prefix':'b.e13.Bi1850C5.f19_g16'}
+    
+    fp_itrace = f"{utils.get_project_root()}/output/variograms/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
+    if not os.path.exists(fp_itrace) :
+        os.makedirs(fp_itrace)
+    fp_sisal = f"{utils.get_project_root()}/output/variograms/sisal/slice{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{sisal_params['res [months]']}/maxlag{str(int(sisal_params['maxlag']))}nlags{sisal_params['nlags']}/trend_{sisal_params['trend']}/"
+    if not os.path.exists(fp_sisal) :
+        os.makedirs(fp_sisal)
 
-verbose =  False
-
-#### if loop only on trend i can load the data just once
-# Load sisal data 
-sisal_df = gutils.get_sisal_data_for_kriging(res=int(params['res [months]']/12),countries=params['countries'],verbose=verbose)
-# load itrace data
-itrace_data = gutils.get_preprocessed_itrace_data(res=params['res [months]'],P=True,format='xr',verbose=False,
-                                            sim_prefix = 'b.e13.Bi1850C5.f19_g16',
-                                            sim_suffix ='100001-199912', #12:'800001-899912', #16:'400001-499912', #20 :'100001-199912',
-                                            sim_forcings='ice_ghg_orb_wtr',
-                                            sim_kyr= int(params['Itrace simulation spec']['time'][:2]),
-                                            sim_num='01',
-                                            sim_model='clm2.h0',
-                                            ) # xr
-for trend in trends:
-    print('..........................................')
-    print('trend=',trend)
-    print('..........................................')
-
-    params['trend']=trend
-    fp = f"{utils.get_project_root()}/output/variograms/itrace/sim{params['Itrace simulation spec']['time']}/res{params['res [months]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
-    if not os.path.exists(fp) :
-        os.makedirs(fp)
-
-    # Variogram computation
-    for azimuth in azimuths :
-        print(f'computation dir={azimuth}')
-        params['direction']=azimuth
-        gutils.iterate_and_aggregate_variograms(data_ds = itrace_data, #type:ignore
-                                            fp=fp,
-                                            config_dict=params,
-                                            data_cols=data_cols,
-                                            mask_pts = sisal_df, # type:ignore
-                                            verbose = verbose
-                                        )
+    # DATA LOADING #######################################
+    if (tmp_kyr is None) or (kyr!=tmp_kyr) : #->if kyr is the same as previous iteration, do not reload the data
+        tmp_kyr = kyr
+        # sisal data must be truncated to the right time period
+        sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
+        # load itrace data for the given kyr
+        itrace_data = gutils.get_preprocessed_itrace_data(res=itrace_params['res [months]'],P=True,format='xr',verbose=verbose,
+                                                    sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
+                                                    sim_suffix =itrace_params['Itrace simulation spec']['suffix'], #12:'800001-899912', #16:'400001-499912', #20 :'100001-199912',
+                                                    sim_forcings=itrace_params['Itrace simulation spec']['forcings'],
+                                                    sim_kyr= int(itrace_params['Itrace simulation spec']['kyr']),
+                                                    sim_num=itrace_params['Itrace simulation spec']['num'],
+                                                    sim_model=itrace_params['Itrace simulation spec']['model'],
+                                                    ) # xr
+    # VARIOGRAMS ##########################################
+    if itrace :
+        print('variogram itrace...')
+        gutils.iterate_and_aggregate_variograms(data = itrace_data, #type:ignore
+                                                fp=fp_itrace,
+                                                config_dict=itrace_params,
+                                                data_cols=data_cols,
+                                                mask_pts = sisal_df, # type:ignore
+                                                verbose = verbose
+                                            )
+    if sisal :
+        print('variogram sisal...')
+        gutils.iterate_and_aggregate_variograms(data = sisal_df_valid, #type:ignore
+                                                fp=fp_sisal,
+                                                config_dict=sisal_params,
+                                                data_cols=data_cols,
+                                                mask_pts = None,
+                                                verbose = False
+                                            )
     # Variogram model fitting and plotting (saving results only)
     dict_dfs = {}
     for a in azimuths:
-        dict_dfs[f'i{a}'] = {'df': pd.read_csv(fp+f'vario_{a}_df.csv')}
-
+        if itrace:
+            dict_dfs[f'i{a}'] = {'df': pd.read_csv(fp_itrace+f'vario_{a}_df.csv')}
+        if sisal :
+            dict_dfs[f's{a}'] = {'df': pd.read_csv(fp_sisal+f'vario_{a}_df.csv')}
     for key in dict_dfs.keys():
         dict_dfs[key]['params'],dict_dfs[key]['fct_fitted'],dict_dfs[key]['pcov'] = gutils.fit_variogram_model(bins=dict_dfs[key]['df']['lag'], # type:ignore
                                                                                     gammas=dict_dfs[key]['df']['gamma'],
-                                                                                    model_name=params['model_name'],
+                                                                                    model_name=model_name,
                                                                                     pair_counts=dict_dfs[key]['df']['count']
                                                                                     ) 
-        
-    fig,ax = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs['iNone']['df']['lag'],
-                                            gamma=dict_dfs['iNone']['df']['gamma'],
-                                            time='iTrace dataset - 11.7 to 11 ky BP - weighted average',
-                                            counts=dict_dfs['iNone']['df']['count'],
-                                            min_pairs=20,
-                                            plot_model=True,
-                                            model_name=params['model_name'],
-                                            model_fct=dict_dfs['iNone']['fct_fitted'],
-                                            model_params=dict_dfs['iNone']['params'],
-                                            figsize=(10,5),
-                                            save_name=fp+'fig.png'
-                                            ) # type:ignore
+        if key.startswith('i'):
+            fp = fp_itrace
+            title = 'iTrace dataset'
+            textbox_loc=(0.835, 0.25)
+            legend_loc='lower right'
+        else : 
+            fp = fp_sisal
+            title = 'SISAL dataset'
+            textbox_loc=(0.835, 0.65)
+            legend_loc='upper right'
+        print('plotting and saving figure')
+        fig,ax = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs[key]['df']['lag'],
+                                                gamma=dict_dfs[key]['df']['gamma'],
+                                                time=f'{title} - {int(kyr)-1} to {kyr} kyr BP',
+                                                counts=dict_dfs[key]['df']['count'],
+                                                min_pairs=20,
+                                                plot_model=True,
+                                                model_name=model_name,
+                                                model_fct=dict_dfs[key]['fct_fitted'],
+                                                model_params=dict_dfs[key]['params'],
+                                                figsize=(10,5),
+                                                textbox_loc=textbox_loc,
+                                                legend_loc=legend_loc,
+                                                save_name=f'{fp}fig_{key[1:]}.png'
+                                                ) # type:ignore
 
-    list_dir = [az for az in azimuths if az is not None]
-    if len(list_dir)>0:
-        fig,axes = plt.subplots(2,2,figsize=(20,10))
-        for i in range(2):
-            for j in range(2):
-                key = f'i_{list_dir[j+2*i]}'
-                axes[i,j] = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs[key]['df']['lag'],
-                                                                    gamma=dict_dfs[key]['df']['gamma'],
-                                                                    time='iTrace dataset - 11.7 to 11 ky BP - weighted average',
-                                                                    counts=dict_dfs[key]['df']['count'],
-                                                                    min_pairs=20,
-                                                                    plot_model=True,
-                                                                    model_name=params['model_name'],
-                                                                    model_fct=dict_dfs[key]['fct_fitted'],
-                                                                    model_params=dict_dfs[key]['params'],
-                                                                    figsize=(10,5),
-                                                                    ax_ = axes[i,j],
-                                                                    save_name=f'{fp}fig_dir{list_dir[j+2*i]}.png'
-                                                                    ) # type:ignore
-                axes[i,j].set_title(f'dir={list_dir[j+2*i]}')
-        fig.tight_layout()
-        plt.savefig(f'{fp}fig_dirs_all.png')
     plt.close('all')
