@@ -144,14 +144,13 @@ def fit_multiple_linear_model(X, y,predictors):
     model_full  = sm.OLS(y, X_full).fit()
     beta_full =  model_full.params
     ssr_full = np.sum(model_full.resid**2)
-    
+    sst = np.nansum((y - np.nanmean(y))**2)
+
     # r2 and adjusted r2
     y_pred = model_full.fittedvalues
-    y_res = y-y_pred
-    mae = np.mean(np.abs(y - y_pred))
-    sst = np.sum((y - y.mean())**2)
-    full_r2 = 1- ssr_full/sst
-    adj_r2 = 1 - (ssr_full/(n-p-1)) / (sst/(n-1))
+    mae = utils.MAE(y,y_pred) #np.mean(np.abs(y - y_pred))
+    full_r2 = utils.r2(y,y_pred)
+    adj_r2 = utils.r2_adj(y,y_pred,p)
 
     partial_r2 = {}
     for j in range(X.shape[1]):

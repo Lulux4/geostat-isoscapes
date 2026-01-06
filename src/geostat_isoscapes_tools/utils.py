@@ -204,7 +204,7 @@ def apply_spatial_mask(df, spatial_mask, lat='lat', lon='lon',mask_col='mask'):
 # =========================================================================================
 # STATISTICAL METRICS
 # =========================================================================================
-def compute_r2(y_true : np.ndarray, y_pred : np.ndarray, weights = None) -> float:
+def r2(y_true : np.ndarray, y_pred : np.ndarray, weights = None) -> float:
     """ Computes the R^2 between true and predicted values 
     """
     if weights is None : 
@@ -213,3 +213,27 @@ def compute_r2(y_true : np.ndarray, y_pred : np.ndarray, weights = None) -> floa
     ssr = np.nansum(weights * (y_true - y_pred)**2)
     r2 = 1 - (ssr / sst)
     return r2
+
+def r2_adj(y_true : np.ndarray, y_pred : np.ndarray, p : int, weights = None):
+    """ Compute the r2 adjusted for the number of parameters in the prediction model """
+    if weights is None : 
+        weights = np.ones_like(y_true)
+    n = len(y_true)
+    sst = np.nansum(weights * (y_true - np.nanmean(y_true))**2)
+    ssr = np.nansum(weights * (y_true - y_pred)**2)
+    adj_r2 = 1 - (ssr/(n-p-1)) / (sst/(n-1))
+    return adj_r2
+
+def RSE(y_true,y_pred,n_params):
+    """ compute residual standard error of predicted values, given the number of fit parameters n_params"""
+    rss = np.nansum((y_true-y_pred)**2)
+    df = len(y_true)-n_params 
+    return np.sqrt(rss/df)
+
+def RMSE(y_true,y_pred):
+    """ Root mean squared error of predicted values y_pred """
+    return np.sqrt(np.nanmean((y_true-y_pred)**2))
+
+def MAE(y_true,y_pred):
+    """ compute mean absolute error of the predicted values """
+    return np.nanmean(np.abs(y_true-y_pred))

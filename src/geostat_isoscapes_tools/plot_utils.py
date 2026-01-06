@@ -179,7 +179,7 @@ def plot_variogram_from_bins_and_gamma(centers,
             weights = None
             if counts is not None : 
                 weights = gutils.get_weights_from_pair_counts(counts)
-            r2 = utils.compute_r2(gamma, model_fct(centers), weights=weights)
+            r2 = utils.r2(gamma, model_fct(centers), weights=weights)
             textstr = f"Range: {range_:.2e} m\nSill: {sill:.2f} ‰²\nNugget: {nugget:.2f} ‰²\nR²: {r2:.2f}"
             ax.text(textbox_loc[0],textbox_loc[1], textstr,
                     transform=ax.transAxes,
