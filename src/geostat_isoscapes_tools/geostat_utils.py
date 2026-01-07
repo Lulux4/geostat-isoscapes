@@ -755,7 +755,7 @@ def make_fitted_model_func(f,*args,**kwargs):
 # =============================================
 def get_sisal_data_for_kriging(res : int | None = 200, 
                                temp_ds_fn : str = '/data/temperature/temp_800ka_ann.nc',
-                               countries : list | None = ['China'],
+                               regions : tuple[str,list[str]] | None = None,
                                buffer_km : float = 500,
                                conversion : str | None = 'd18Op_VSMOW_exactconv',
                                verbose : bool = True):
@@ -777,8 +777,8 @@ def get_sisal_data_for_kriging(res : int | None = 200,
         data_df['binned_age'] = utils.slice_in_equal_bins(data_df['age'].copy(),res)
     
     data_df = data_df.rename(columns={'latitude':'lat','longitude':'lon'})
-    if countries is not None :
-        data_df = utils.mask_country_shape(data_df,buffer_km=buffer_km,country_names=countries)
+    if regions is not None :
+        data_df = utils.mask_regions_shape(data_df,buffer_km=buffer_km,regions=regions)
 
     print('sisal dataframe is ready')
     return data_df
@@ -792,8 +792,8 @@ def get_preprocessed_itrace_data(res=None,
                             sim_model = 'clm2.h0',
                             sim_suffix = '800001-899912',
                             include_snow = True,
-                            countries : list| None = None,
-                            buffer_km : float = 500,
+                            regions : tuple[str,list[str]]| None = None,
+                            buffer_km : float = 50,
                             P : bool = False,
                             format : str = 'df',
                             verbose : bool = True) :
@@ -841,8 +841,8 @@ def get_preprocessed_itrace_data(res=None,
         if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
         delta18 = utils.bin_xrDataArray_time(delta18,res=res)
 
-    if countries is not None :
-        delta18 = utils.mask_country_shape(delta18,buffer_km=buffer_km,country_names=countries)  
+    if regions is not None :
+        delta18 = utils.mask_regions_shape(delta18,buffer_km=buffer_km,regions=regions)  
 
     if P :
         if verbose : print('  Loading files for total precipitation info')
@@ -864,8 +864,8 @@ def get_preprocessed_itrace_data(res=None,
             precip_da = utils.bin_xrDataArray_time(precip_da,res=res)
             precip_da = precip_da * res # uniform integration over the bin width
 
-        if countries is not None :
-            precip_da = utils.mask_country_shape(precip_da,buffer_km=buffer_km,country_names=countries) 
+        if regions is not None :
+            precip_da = utils.mask_regions_shape(precip_da,buffer_km=buffer_km,regions=regions) 
         d18_P_ds = xr.Dataset({'d18Op':delta18, 'P': precip_da})
     
     # outputs differ depending on bools P_da, delta18_da... Return df of xrdataarrays.

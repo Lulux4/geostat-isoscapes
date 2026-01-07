@@ -10,20 +10,20 @@ sns.set_style('dark')
 # Define parameters to apply successively
 ###############################################
 # WHICH DATASET DO YOU WANT TO PROCESS ?
-sisal = False
+sisal = True
 itrace = True
-# DEFINE THE PARAMS :
+# DEFINE THE PARAMETERS ON WHICH TO LOOP :
 trends = [
-    # 'multiple_linear_ele_D',
-    # 'multiple_linear_D',    
-    # 'multiple_linear_latabs_latReLU',
+    'multiple_linear_ele_D',
+    'multiple_linear_D',    
+    'multiple_linear_latabs_latReLU',
     # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_D',
     'multiple_linear_latabs_latReLU_ele',
-    'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_ele_D',
-    'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
     ]
 
 azimuths = [None] # 0 45 90 180
@@ -33,14 +33,15 @@ sims = {'12':{'num':'05','suffix':'800001-899912'},
         '20':{'num':'01','suffix':'100001-199912'}
         }
 
-res_months = 1
-verbose = False
-countries = None 
-model_name = 'spherical'
+res_months = 12*200 # min 12 if using sisal, min 1 if using itrace
 
-# Load sisal data only one time unless we want to loop on resolution
-res_sisal = 12
-sisal_df = gutils.get_sisal_data_for_kriging(res=int(res_sisal/12),countries=countries,verbose=verbose)
+verbose = False
+regions_list = [('continents',['South America','North America']),
+                ('continents',['Europe']),
+                ('continents',['Asia']),
+                ('continents',['Oceania'])] #[None]#[('continents',['South America'])]#('subregion',['Western Europe','Southern Europe','Northern Europe'])
+buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb with antimeridional line
+model_name = 'spherical'
 
 # Define name of cols 
 data_cols = {'lat':'lat',
@@ -49,12 +50,14 @@ data_cols = {'lat':'lat',
 cols_sisal = ['binned_age','lat','lon','site_id','d18Op_VSMOW_exactconv']
 
 # Prepare the iterations ###############################
-iters = itertools.product(sims.keys(),trends,azimuths)
-tmp_kyr = None
+iters = itertools.product(sims.keys(),trends,azimuths,regions_list)
 
-for kyr,trend,azimuth in iters :
+tmp_kyr = None
+tmp_regions = 'init'
+
+for kyr,trend,azimuth,regions in iters :
     print('=====================================================================')
-    print(f'Time={kyr} kyr BP, trend={trend}, direction={azimuth}')
+    print(f'Time={kyr} kyr BP, trend={trend}, direction={azimuth}, regions={regions}')
     print('=====================================================================')
     # COMFIGURATION ####################################
     sisal_params = {
@@ -68,7 +71,8 @@ for kyr,trend,azimuth in iters :
         'mask radius [km]': 1000,
         'res [months]': res_months,
         'direction': azimuth,
-        'countries':None,
+        'regions':regions,
+        'buffer_km': buffer_km,
         'const_coords':False,}
     
     itrace_params = sisal_params.copy()
@@ -80,26 +84,46 @@ for kyr,trend,azimuth in iters :
                                                 'prefix':'b.e13.Bi1850C5.f19_g16'}
     
     fp_itrace = f"{utils.get_project_root()}/output/variograms/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
+    fp_sisal = f"{utils.get_project_root()}/output/variograms/sisal/slice{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{sisal_params['res [months]']}/maxlag{str(int(sisal_params['maxlag']))}nlags{sisal_params['nlags']}/trend_{sisal_params['trend']}/"
+    if regions is not None :
+        str_regions = ''
+        for r in regions[1]:
+            str_regions += r
+        fp_itrace = f"{str(fp_itrace)}{regions[0]}_{str_regions.replace(' ','')}/"
+        fp_sisal = f"{str(fp_sisal)}{regions[0]}_{str_regions.replace(' ','')}/"
+
     if not os.path.exists(fp_itrace) :
         os.makedirs(fp_itrace)
-    fp_sisal = f"{utils.get_project_root()}/output/variograms/sisal/slice{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{sisal_params['res [months]']}/maxlag{str(int(sisal_params['maxlag']))}nlags{sisal_params['nlags']}/trend_{sisal_params['trend']}/"
     if not os.path.exists(fp_sisal) :
         os.makedirs(fp_sisal)
 
     # DATA LOADING #######################################
+    if (tmp_regions == 'init') or (regions!=tmp_regions): # avoid to reload the same data as previous iteration
+        tmp_regions = regions
+        sisal_df = gutils.get_sisal_data_for_kriging(res=int(sisal_params['res [months]' ]/12),
+                                                     regions=regions,
+                                                     buffer_km=sisal_params['buffer_km'],
+                                                     verbose=verbose)
+
     if (tmp_kyr is None) or (kyr!=tmp_kyr) : #->if kyr is the same as previous iteration, do not reload the data
         tmp_kyr = kyr
         # sisal data must be truncated to the right time period
         sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
         # load itrace data for the given kyr
-        itrace_data = gutils.get_preprocessed_itrace_data(res=itrace_params['res [months]'],P=True,format='xr',verbose=verbose,
-                                                    sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
-                                                    sim_suffix =itrace_params['Itrace simulation spec']['suffix'], #12:'800001-899912', #16:'400001-499912', #20 :'100001-199912',
-                                                    sim_forcings=itrace_params['Itrace simulation spec']['forcings'],
-                                                    sim_kyr= int(itrace_params['Itrace simulation spec']['kyr']),
-                                                    sim_num=itrace_params['Itrace simulation spec']['num'],
-                                                    sim_model=itrace_params['Itrace simulation spec']['model'],
-                                                    ) # xr
+        itrace_data = gutils.get_preprocessed_itrace_data(
+            res=itrace_params['res [months]'],
+            P=True,
+            format='xr',
+            verbose=verbose,
+            regions=regions,
+            buffer_km = itrace_params['buffer_km'],
+            sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
+            sim_suffix =itrace_params['Itrace simulation spec']['suffix'], 
+            sim_forcings=itrace_params['Itrace simulation spec']['forcings'],
+            sim_kyr= int(itrace_params['Itrace simulation spec']['kyr']),
+            sim_num=itrace_params['Itrace simulation spec']['num'],
+            sim_model=itrace_params['Itrace simulation spec']['model'],
+        ) # xr
     # VARIOGRAMS ##########################################
     if itrace :
         print('variogram itrace...')

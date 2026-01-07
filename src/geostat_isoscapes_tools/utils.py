@@ -62,21 +62,36 @@ def get_yrBP_from_itrace_time(months_after_start : int | pd.Series, start_year :
 # =============================================================================================
 # "Spatial" computations
 # =============================================================================================
-
-def mask_country_shape(da : xr.DataArray | pd.DataFrame, 
-                       country_names: list[str] = ["China"], 
+# def split_antimeridian(geom):
+#     antimeridian = shapely.LineString([(180, -90), (180, 90)])
+#     try:
+#         return shapely.ops.split(geom, antimeridian)
+#     except Exception:
+#         return geom
+    
+def mask_regions_shape(da : xr.DataArray | pd.DataFrame, 
+                       regions: tuple[str,list[str]]= ('continents',["Asia"]), 
                        all_touched : bool = True, 
-                       shapefile : str = "../data/shapefiles/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp",
+                       shapefile : str = f"{get_project_root()}/data/shapefiles/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp",
                        buffer_km : float = 0, 
                        ) -> xr.DataArray | pd.DataFrame :
-    """ This functions defines a mask for the given country (polygone) and filters the points of the provided data array
+    """ This functions defines a mask for the given regions and filters the points of the provided data array
     (which should have coords lon and lat) according to this mask. If all_touched is set to True (default), the mask 
-    includes pixels that have at least one corner inside the country, otherwise it includes only pixels with their center
-    inside the country.
+    includes pixels that have at least one corner inside the region, otherwise it includes only pixels with their center
+    inside the region.
     """
     # read country borders from shapefile
     world = gpd.read_file(shapefile)
-    shape = world[world["NAME"].isin(country_names)].to_crs("EPSG:4326")
+    if regions[0]=='countries':
+        countries = regions[1]
+    elif regions[0]=='continents':
+        countries = world.loc[world['CONTINENT'].isin(regions[1]),'NAME'].to_list()
+    elif regions[0]=='subregion':
+        countries = world.loc[world['SUBREGION'].isin(regions[1]),'NAME'].to_list()
+    else :
+        raise ValueError("The first element of tuple 'regions' must be either 'countries' or 'continents'. \n It specifies what is contained in the second element : the list of geographical names.")
+    shape = world[world["NAME"].isin(countries)].to_crs("EPSG:4326")
+    shape["geometry"] = shape.geometry.make_valid()
     geom = shape.union_all()
     
     # Apply buffer if requested
@@ -86,8 +101,9 @@ def mask_country_shape(da : xr.DataArray | pd.DataFrame,
         geom_m = shape_m.union_all()
         geom_m_buffered = geom_m.buffer(buffer_km * 1000)  # buffer in meters
         # Reproject back to lon/lat
-        shape_buffered = gpd.GeoSeries([geom_m_buffered], crs=3857).to_crs(4326)
-        geom = shape_buffered.union_all()
+        geom = gpd.GeoSeries([geom_m_buffered], crs=3857).to_crs(4326).iloc[0]
+        geom = shapely.make_valid(geom) # type:ignore
+        # geom = split_antimeridian(geom) # this does not work : todo : find how to deal with shapes that cross the antimeridian line
 
     if isinstance(da, xr.DataArray):
         # grid
