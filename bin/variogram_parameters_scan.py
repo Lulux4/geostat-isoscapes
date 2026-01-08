@@ -9,61 +9,101 @@ sns.set_style('dark')
 ###############################################
 # Define parameters to apply successively
 ###############################################
-# WHICH DATASET DO YOU WANT TO PROCESS ?
-sisal = True
+
+# DATASETS TO STUDY :
+sisal = False
 itrace = True
-# DEFINE THE PARAMETERS ON WHICH TO LOOP :
+
+# PARAMETERS LISTS :
+
+mask_itrace_around_sisal_pts = False
+
 trends = [
     'multiple_linear_ele_D',
     'multiple_linear_D',    
+    'multiple_linear_ele',
+    # 'multiple_linear_lat_',
+    # 'multiple_linear_lat_ele',
+    # 'multiple_linear_lat_D',
+    # 'multiple_linear_lat_ele_D',
+    
     'multiple_linear_latabs_latReLU',
-    # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_D',
     'multiple_linear_latabs_latReLU_ele',
-    # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_ele_D',
-    # 'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
     ]
 
-azimuths = [None] # 0 45 90 180
+azimuths = [None] # 0 45 90 180 # for directional variograms
 
-sims = {'12':{'num':'05','suffix':'800001-899912'},
-        '16':{'num':'01','suffix':'400001-499912'},
-        '20':{'num':'01','suffix':'100001-199912'}
-        }
+sims = { # simulation spec for itrace dataset
+    '12':{'num':'05','suffix':'800001-899912'},
+    '16':{'num':'01','suffix':'400001-499912'},
+    '20':{'num':'01','suffix':'100001-199912'}
+    }
 
-res_months = 12*200 # min 12 if using sisal, min 1 if using itrace
+res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
 
 verbose = False
-regions_list = [('continents',['South America','North America']),
-                ('continents',['Europe']),
-                ('continents',['Asia']),
-                ('continents',['Oceania'])] #[None]#[('continents',['South America'])]#('subregion',['Western Europe','Southern Europe','Northern Europe'])
-buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb with antimeridional line
-model_name = 'spherical'
 
-# Define name of cols 
+# geographical regions on which to mask itrace/sisal data for the variogram computations
+# default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
+regions_list = [
+    # None
+    # ('continents',['South America']),
+    # ('continents',['North America']),
+    # ('subregions',['Nothern Europe','Southern Europe','Western Europe']),
+    # ('continents',['Asia']),
+    # ('continents',['Oceania']),
+    ('continents', ['Africa']),
+    # ('countries',['China']),
+    # ('countries',['United States of America']),
+    # ('countries',['Canada']),
+    # ('countries',['Australia']),
+    # ('countries',['Brazil']),
+    # ('countries',['France']),
+    # ('countries',['Bolivia']),
+    # ('countries',['South Africa']),
+    # ('countries',['Afghanistan'])
+    ] 
+# buffer to keep some data around the regions boundaries (typically for country-sized regions) 
+buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb with antimeridional line
+
+# Variogram model to try to fit
+model_name = 'spherical'
+maxlag = 5e6
+nlags = 20
+
+# Naming convention of columns
 data_cols = {'lat':'lat',
             'lon':'lon',
             'quantity':'d18Op'}
 cols_sisal = ['binned_age','lat','lon','site_id','d18Op_VSMOW_exactconv']
 
-# Prepare the iterations ###############################
-iters = itertools.product(sims.keys(),trends,azimuths,regions_list)
+# We already load sisal data (unless we want to loop on the temporal resolution)
+
+
+# Prepare the iterations 
+iters = itertools.product(res_months_list,sims.keys(),regions_list,trends,azimuths)
 
 tmp_kyr = None
-tmp_regions = 'init'
+tmp_regions = None
+tmp_res = None
+init = True # turns to false after first iteration
 
-for kyr,trend,azimuth,regions in iters :
-    print('=====================================================================')
-    print(f'Time={kyr} kyr BP, trend={trend}, direction={azimuth}, regions={regions}')
-    print('=====================================================================')
-    # COMFIGURATION ####################################
-    sisal_params = {
+for res_months,kyr,regions,trend,azimuth in iters :
+    print('====================================================================================================================')
+    print(f'Time={kyr} kyr BP, resolution={res_months} months, trend={trend}, direction={azimuth}, regions={regions}')
+    print('====================================================================================================================')
+    # ======================= CONFIGURATION =======================
+    params = {
+        'kyr' : kyr,
         'trend_before_mask': True,
-        'maxlag': 1.2e7,
-        'nlags': 20,
+        'maxlag': maxlag,
+        'nlags': nlags,
         'centers': None,
         'trend':trend,
         'tolerance' : 22.5,
@@ -75,47 +115,74 @@ for kyr,trend,azimuth,regions in iters :
         'buffer_km': buffer_km,
         'const_coords':False,}
     
-    itrace_params = sisal_params.copy()
-    itrace_params['Itrace simulation spec'] = { 'kyr': kyr,                   
+    if itrace : 
+        itrace_params = params.copy()
+        itrace_params['Itrace simulation spec'] = { 'kyr': kyr,                   
                                                 'num': sims[kyr]['num'],                
                                                 'model':'clm2.h0',
                                                 'forcings':'ice_ghg_orb_wtr',   
                                                 'suffix': sims[kyr]['suffix'], 
                                                 'prefix':'b.e13.Bi1850C5.f19_g16'}
     
-    fp_itrace = f"{utils.get_project_root()}/output/variograms/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
-    fp_sisal = f"{utils.get_project_root()}/output/variograms/sisal/slice{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{sisal_params['res [months]']}/maxlag{str(int(sisal_params['maxlag']))}nlags{sisal_params['nlags']}/trend_{sisal_params['trend']}/"
+        fp_itrace = f"{utils.get_project_root()}/output/variograms/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
+        if mask_itrace_around_sisal_pts :
+            fp_itrace = fp_itrace + "sisal_mask/"
+        else : 
+            fp_itrace = fp_itrace + "no_mask/"
+    if sisal : 
+        fp_sisal = f"{utils.get_project_root()}/output/variograms/sisal/slice{params['kyr']}kyrBP/res{params['res [months]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
     if regions is not None :
         str_regions = ''
-        for r in regions[1]:
+        for r in regions[1]: #type:ignore
             str_regions += r
-        fp_itrace = f"{str(fp_itrace)}{regions[0]}_{str_regions.replace(' ','')}/"
-        fp_sisal = f"{str(fp_sisal)}{regions[0]}_{str_regions.replace(' ','')}/"
+        if itrace : 
+            fp_itrace = f"{str(fp_itrace)}{regions[0]}_{str_regions.replace(' ','')}/"
+        if sisal :
+            fp_sisal = f"{str(fp_sisal)}{regions[0]}_{str_regions.replace(' ','')}/"
+    if itrace :
+        if not os.path.exists(fp_itrace):
+            os.makedirs(fp_itrace)
+    if sisal :
+        if not os.path.exists(fp_sisal) :
+            os.makedirs(fp_sisal)
 
-    if not os.path.exists(fp_itrace) :
-        os.makedirs(fp_itrace)
-    if not os.path.exists(fp_sisal) :
-        os.makedirs(fp_sisal)
+    # ================= DATA LOADING =====================
+    # set a change "tracker" to avoid repeating if statements
+    sisal_change = False
+    # 1. If the resolution changed, we must reload sisal global data
+    if (sisal & (tmp_res!=res_months)) | (mask_itrace_around_sisal_pts & init):
+        print('----- New sisal resolution : loading sisal global df')
+        sisal_df_global = gutils.get_sisal_data_for_kriging(res=int(res_months/12),
+                                                                    regions=None,
+                                                                    buffer_km=buffer_km,
+                                                                    verbose=verbose)
+        sisal_df = sisal_df_global
+        sisal_change = True
+        init=False
 
-    # DATA LOADING #######################################
-    if (tmp_regions == 'init') or (regions!=tmp_regions): # avoid to reload the same data as previous iteration
-        tmp_regions = regions
-        sisal_df = gutils.get_sisal_data_for_kriging(res=int(sisal_params['res [months]' ]/12),
-                                                     regions=regions,
-                                                     buffer_km=sisal_params['buffer_km'],
-                                                     verbose=verbose)
+    # 2. If region changed, truncate the global df 
+    if sisal & ((regions!=tmp_regions) | sisal_change) & (regions is not None) : 
+        print('----- New sisal upper-level param res was set, or new regions params is detected : applying a new mask to sisal global df')
+        sisal_df_regions = utils.mask_regions_shape(sisal_df_global,buffer_km=buffer_km,regions=regions) # type:ignore
+        sisal_df = sisal_df_regions
+        sisal_change = True
 
-    if (tmp_kyr is None) or (kyr!=tmp_kyr) : #->if kyr is the same as previous iteration, do not reload the data
-        tmp_kyr = kyr
-        # sisal data must be truncated to the right time period
+    # 3. If the temporal slice (kyr) is not the same as previous iteration, 
+    #    we just need to take the right slice of sisal data (no reload)
+    if sisal & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res_months)) | sisal_change) :
+        print('----- New sisal upper-level params region or res was set, or new temporal slice param detected : taking the new slice from sisal df')
         sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
-        # load itrace data for the given kyr
-        itrace_data = gutils.get_preprocessed_itrace_data(
+        
+    # 4. For itrace, we need to reload in any case since we cannot load several slices at the smae time
+    itrace_change = False
+    if itrace & ((tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months)): 
+        print('----- New itrace params res or kyr : loading appropriate data')
+        itrace_data_global = gutils.get_preprocessed_itrace_data(
             res=itrace_params['res [months]'],
             P=True,
             format='xr',
             verbose=verbose,
-            regions=regions,
+            regions=None,
             buffer_km = itrace_params['buffer_km'],
             sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
             sim_suffix =itrace_params['Itrace simulation spec']['suffix'], 
@@ -124,6 +191,19 @@ for kyr,trend,azimuth,regions in iters :
             sim_num=itrace_params['Itrace simulation spec']['num'],
             sim_model=itrace_params['Itrace simulation spec']['model'],
         ) # xr
+        itrace_data = itrace_data_global
+        itrace_change = True
+
+    # 4. Apply new geographical mask if the regions have changed from previous iteration, or if it is the first iter.
+    if (itrace_change | ((regions!=tmp_regions)& itrace)) & (regions is not None): 
+        print('----- New itrace params res or kyr was set, or new regions detected, so we re-mask the global data for the specified regions')
+        itrace_data = utils.mask_regions_shape(itrace_data_global,buffer_km=buffer_km,regions=regions) # type:ignore
+
+    # 5. update our temporary values of kyr and res
+    tmp_kyr = kyr
+    tmp_res = res_months
+    tmp_regions = regions
+
     # VARIOGRAMS ##########################################
     if itrace :
         print('variogram itrace...')
@@ -131,14 +211,14 @@ for kyr,trend,azimuth,regions in iters :
                                                 fp=fp_itrace,
                                                 config_dict=itrace_params,
                                                 data_cols=data_cols,
-                                                mask_pts = sisal_df, # type:ignore
+                                                mask_pts = sisal_df if mask_itrace_around_sisal_pts else None, # type:ignore # TODO : sisal_df_valid or region? depends on the needs, be careful
                                                 verbose = verbose
                                             )
     if sisal :
         print('variogram sisal...')
         gutils.iterate_and_aggregate_variograms(data = sisal_df_valid, #type:ignore
                                                 fp=fp_sisal,
-                                                config_dict=sisal_params,
+                                                config_dict=params,
                                                 data_cols=data_cols,
                                                 mask_pts = None,
                                                 verbose = False
@@ -146,10 +226,12 @@ for kyr,trend,azimuth,regions in iters :
     # Variogram model fitting and plotting (saving results only)
     dict_dfs = {}
     for a in azimuths:
-        if itrace:
-            dict_dfs[f'i{a}'] = {'df': pd.read_csv(fp_itrace+f'vario_{a}_df.csv')}
+        if itrace :
+            if os.path.exists(fp_itrace+f'vario_{a}_df.csv'): # type: ignore
+                dict_dfs[f'i{a}'] = {'df': pd.read_csv(fp_itrace+f'vario_{a}_df.csv')} # type: ignore
         if sisal :
-            dict_dfs[f's{a}'] = {'df': pd.read_csv(fp_sisal+f'vario_{a}_df.csv')}
+            if os.path.exists(fp_sisal+f'vario_{a}_df.csv'): # type: ignore
+                dict_dfs[f's{a}'] = {'df': pd.read_csv(fp_sisal+f'vario_{a}_df.csv')} # type: ignore
     for key in dict_dfs.keys():
         dict_dfs[key]['params'],dict_dfs[key]['fct_fitted'],dict_dfs[key]['pcov'] = gutils.fit_variogram_model(bins=dict_dfs[key]['df']['lag'], # type:ignore
                                                                                     gammas=dict_dfs[key]['df']['gamma'],
@@ -167,10 +249,10 @@ for kyr,trend,azimuth,regions in iters :
             textbox_loc=(0.835, 0.65)
             legend_loc='upper right'
         print('plotting and saving figure')
-        fig,ax = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs[key]['df']['lag'],
-                                                gamma=dict_dfs[key]['df']['gamma'],
+        fig,ax = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs[key]['df']['lag'].values,
+                                                gamma=dict_dfs[key]['df']['gamma'].values,
                                                 time=f'{title} - {int(kyr)-1} to {kyr} kyr BP',
-                                                counts=dict_dfs[key]['df']['count'],
+                                                counts=dict_dfs[key]['df']['count'].values,
                                                 min_pairs=20,
                                                 plot_model=True,
                                                 model_name=model_name,
