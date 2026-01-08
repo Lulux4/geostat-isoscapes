@@ -69,12 +69,12 @@ def get_yrBP_from_itrace_time(months_after_start : int | pd.Series, start_year :
 #     except Exception:
 #         return geom
     
-def mask_regions_shape(da : xr.DataArray | pd.DataFrame, 
+def mask_regions_shape(da : xr.DataArray | xr.Dataset | pd.DataFrame, 
                        regions: tuple[str,list[str]]= ('continents',["Asia"]), 
                        all_touched : bool = True, 
                        shapefile : str = f"{get_project_root()}/data/shapefiles/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp",
                        buffer_km : float = 0, 
-                       ) -> xr.DataArray | pd.DataFrame :
+                       ) -> xr.DataArray | xr.Dataset | pd.DataFrame :
     """ This functions defines a mask for the given regions and filters the points of the provided data array
     (which should have coords lon and lat) according to this mask. If all_touched is set to True (default), the mask 
     includes pixels that have at least one corner inside the region, otherwise it includes only pixels with their center
@@ -86,10 +86,10 @@ def mask_regions_shape(da : xr.DataArray | pd.DataFrame,
         countries = regions[1]
     elif regions[0]=='continents':
         countries = world.loc[world['CONTINENT'].isin(regions[1]),'NAME'].to_list()
-    elif regions[0]=='subregion':
+    elif regions[0]=='subregions':
         countries = world.loc[world['SUBREGION'].isin(regions[1]),'NAME'].to_list()
     else :
-        raise ValueError("The first element of tuple 'regions' must be either 'countries' or 'continents'. \n It specifies what is contained in the second element : the list of geographical names.")
+        raise ValueError("The first element of tuple 'regions' must be 'countries', 'subregions', or 'continents'. \n It specifies what is contained in the second element : the list of geographical names.")
     shape = world[world["NAME"].isin(countries)].to_crs("EPSG:4326")
     shape["geometry"] = shape.geometry.make_valid()
     geom = shape.union_all()
@@ -105,7 +105,7 @@ def mask_regions_shape(da : xr.DataArray | pd.DataFrame,
         geom = shapely.make_valid(geom) # type:ignore
         # geom = split_antimeridian(geom) # this does not work : todo : find how to deal with shapes that cross the antimeridian line
 
-    if isinstance(da, xr.DataArray):
+    if isinstance(da, xr.DataArray) or isinstance(da, xr.Dataset):
         # grid
         lat, lon = da.lat.values, da.lon.values
         
@@ -140,7 +140,7 @@ def mask_regions_shape(da : xr.DataArray | pd.DataFrame,
         return da.loc[mask].reset_index(drop=True) #type:ignore
     
     else:
-        raise TypeError("Input must be an xarray.DataArray or pandas.DataFrame")
+        raise TypeError("Input must be an xarray.DataArray, xr.Dataset or pandas.DataFrame")
 
 def convert_lon_0_360_to_neg180_180(lon:np.ndarray) ->np.ndarray:
     """ Converts longuitudes in the interval O to 360 degreees to -180 to 180 degrees"""

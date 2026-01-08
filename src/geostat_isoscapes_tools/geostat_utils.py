@@ -520,7 +520,8 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
             df[lat]=lats
 
         # Skip if not enough data
-        if df[quantity].notna().sum() < 30:
+        if df[quantity].notna().sum() < 17:
+            print(f'only {df[quantity].notna().sum()} valid data points, skipping this variogram computation')
             continue
 
         # Compute projected coordinates
@@ -604,6 +605,8 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
 def aggregate_variograms(bin_counts,gammas,bins):
     """ TODO 
     """
+    if bin_counts == []:
+        return None
     counts = np.vstack(bin_counts) # shape = n_time * n_bins
     total_counts = np.nansum(counts, axis=0) # shape n_bins
     weighted_mean_gamma = np.nansum(counts * np.vstack(gammas), axis=0) / total_counts # -> element-wise mutliplication of counts*gammas both of shape n_time * n_bins
@@ -657,23 +660,11 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                                                                                 const_coords=config_dict['const_coords'])
     # aggregate semivariances
     if verbose : print('Aggregate variograms')
-    df_all = aggregate_variograms(bin_counts=bin_count,gammas=gammas,bins=ref_bins)
+    df_all = aggregate_variograms(bin_counts=bin_count,gammas=gammas,bins=ref_bins) # df_all can be None if all variograms computations failed at previous step
     # save results
-    # if config_dict['direction'] is not None : # add info on direction in file names
-    #     fp+=f"d{str(config_dict['direction'])}"
-    
-    df_all.to_csv(f'{fp}vario_{config_dict["direction"]}_df.csv')
+    if df_all is not None : 
+        df_all.to_csv(f'{fp}vario_{config_dict["direction"]}_df.csv')
     with open(f'{fp}trend_metrics{config_dict["direction"]}.json', 'w') as f:
-    #     for key,value in results_dict.items():
-    #         print(key)
-    #         print(type(value))
-    #         if type(value)==dict:
-    #             for k,v in value.items():
-    #                 print('  ',k)
-    #                 print('  ',type(v))
-    #                 if type(v)==list:
-    #                     print('      ',type(v[0]))
-    #         print('----')
         json.dump(results_dict, f)
     print(f'outputs saved in folder {fp}, files vario_df.csv and trend_metrics.json')
 

@@ -120,10 +120,10 @@ def plot_projected_data(coords_proj,vals_s, projection_str='Mercator',robust=Tru
         
     return fig, ax
 
-def plot_variogram_from_bins_and_gamma(centers,
-                                       gamma,
+def plot_variogram_from_bins_and_gamma(centers : np.ndarray,
+                                       gamma : np.ndarray,
                                        time : str, 
-                                       counts = None, 
+                                       counts : np.ndarray | None = None, 
                                        std_counts=None,
                                        min_pairs=30, 
                                        plot_model : bool = True, 
@@ -136,16 +136,18 @@ def plot_variogram_from_bins_and_gamma(centers,
                                        ax_ = None,
                                        save_name : str | None = None,
                                        verbose : bool =  False
-                                       ) -> tuple[Figure,Axes] | Axes :
+                                       ) -> tuple[Figure,Axes] | Axes | tuple:
     """ Plot an empirical variogram from given bin centers and semivariances values.
     Overlays pairs number per bin if counts is given. Does not plot bins with less than min_pairs if counts is given.
     """
     if counts is not None :
         reliable = counts >= min_pairs
         centers = centers[reliable]
+        if all(~ reliable):
+            print('All bins have less than {min_pairs} items, we cannot produce a reliable variogram.')
+            return (None,None)
         gamma = gamma[reliable]
-        if counts is not None:
-            counts = counts[reliable]
+        counts = counts[reliable]
     if ax_ is None :
         fig, ax = plt.subplots(figsize=figsize)
     else :
