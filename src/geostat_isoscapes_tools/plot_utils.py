@@ -8,6 +8,8 @@ import numpy as np
 from . import utils, geostat_utils as gutils
 import pandas as pd
 import plotly.graph_objects as go
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.axes import Axes
 
 def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
@@ -335,3 +337,70 @@ def plot_global_map(data:pd.DataFrame,
             template="plotly_white"
     )
     return fig
+
+def plot_ked_platecarree_points(lon_pred, lat_pred, z_pred, ss_pred,
+                                df_exp, value_col='d18Op_VSMOW',
+                                title="Kriging with External Drift (PlateCarree)",
+                                cmap="plasma",
+                                figsize=(14,6),
+                                vmin=None, vmax=None,
+                                s_pred=20,  # size of predicted squares
+                                s_obs=40    # size of observation points
+                            ):
+    """
+    Plot KED kriging results in lon/lat (PlateCarree projection) using discrete scatter plots.
+    Inputs :
+        lon_pred, lat_pred : 1D arrays of longitudes and latitudes for predicted points
+        z_pred : 1D array of predicted values
+        ss_pred : 1D array of kriging variances
+        df_exp : DataFrame with observed points (must have lon/lat columns)
+        value_col : column name in df_exp for observed values
+    """
+    
+    # color limits
+    vmin = vmin if vmin is not None else np.nanmin(z_pred)
+    vmax = vmax if vmax is not None else np.nanmax(z_pred)
+    
+    fig, axes = plt.subplots(1, 2, figsize=figsize,subplot_kw={'projection': ccrs.PlateCarree()})
+    fig.subplots_adjust(
+        left=0.05,
+        right=0.95,
+        bottom=0.08,
+        top=0.90,
+        wspace=0.12
+    )
+    # set extent with padding
+    lon_min, lon_max = np.min(lon_pred), np.max(lon_pred)
+    lat_min, lat_max = np.min(lat_pred), np.max(lat_pred)
+    pad_lon = (lon_max - lon_min) * 0.05
+    pad_lat = (lat_max - lat_min) * 0.05
+
+    for ax in axes:
+        ax.set_extent([lon_min - pad_lon, lon_max + pad_lon,lat_min - pad_lat, lat_max + pad_lat], crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.6)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.4)
+        ax.add_feature(cfeature.LAND, facecolor="#f0f0f0", edgecolor="none")
+        ax.add_feature(cfeature.OCEAN, facecolor="#dff4fd", edgecolor="none")
+        gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray', alpha=0.5, linestyle='--')
+        gl.right_labels = gl.top_labels = False
+
+    sc1 = axes[0].scatter(lon_pred, lat_pred,c=z_pred,cmap=cmap,vmin=vmin, vmax=vmax,s=s_pred,marker='s', edgecolor='none',transform=ccrs.PlateCarree())
+    axes[0].scatter(df_exp['lon'], df_exp['lat'],c=df_exp[value_col],cmap=cmap,vmin=vmin, vmax=vmax,s=s_obs,edgecolor='black',linewidth=0.4,transform=ccrs.PlateCarree())
+    # cbar1 = plt.colorbar(sc1, ax=axes[0], orientation='vertical', shrink=0.75, pad=0.05)
+    divider = make_axes_locatable(axes[0])
+    cax1 = divider.append_axes("right", size="4%", pad=0.05,axes_class=Axes)
+    cbar1 = fig.colorbar(sc1, cax=cax1)
+    cbar1.set_label(f"{value_col} (‰ VSMOW)")
+    axes[0].set_title("Kriging Prediction (discrete)")
+
+    sc2 = axes[1].scatter(lon_pred, lat_pred,c=ss_pred,cmap='plasma',s=s_pred, marker='s',edgecolor='none',transform=ccrs.PlateCarree())
+    # cbar2 = plt.colorbar(sc2, ax=axes[1], orientation='vertical', shrink=0.75, pad=0.05)
+    divider = make_axes_locatable(axes[1])
+    cax2 = divider.append_axes("right", size="4%", pad=0.05, axes_class=Axes)
+    cbar2 = fig.colorbar(sc2, cax=cax2)
+    cbar2.set_label("Kriging Variance [‰²]")
+    axes[1].set_title("Kriging Variance (discrete)")
+
+    fig.suptitle(title, fontsize=15,y=0.94)
+    # plt.tight_layout()
+    return fig, axes

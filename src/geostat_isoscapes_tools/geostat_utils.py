@@ -769,6 +769,7 @@ def get_sisal_data_for_kriging(res : int | None = 200,
     
     data_df = data_df.rename(columns={'latitude':'lat','longitude':'lon'})
     if regions is not None :
+        if verbose : print(' > keeping only the regions specified in argument')
         data_df = utils.mask_regions_shape(data_df,buffer_km=buffer_km,regions=regions)
 
     print('sisal dataframe is ready')

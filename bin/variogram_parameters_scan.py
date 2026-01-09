@@ -4,6 +4,8 @@ import seaborn as sns
 import pandas as pd 
 import os 
 import itertools
+import json
+
 sns.set_style('dark')
 
 ###############################################
@@ -19,30 +21,30 @@ itrace = True
 mask_itrace_around_sisal_pts = False
 
 trends = [
-    'multiple_linear_ele_D',
-    'multiple_linear_D',    
-    'multiple_linear_ele',
+    # 'multiple_linear_ele_D',
+    # 'multiple_linear_D',    
+    # 'multiple_linear_ele',
     # 'multiple_linear_lat_',
     # 'multiple_linear_lat_ele',
     # 'multiple_linear_lat_D',
     # 'multiple_linear_lat_ele_D',
     
-    'multiple_linear_latabs_latReLU',
-    'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_latabs_latReLU_D',
-    'multiple_linear_latabs_latReLU_ele',
-    'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU',
+    # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_D',
+    # 'multiple_linear_latabs_latReLU_ele',
+    # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_ele_D',
-    'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
     ]
 
 azimuths = [None] # 0 45 90 180 # for directional variograms
 
 sims = { # simulation spec for itrace dataset
     '12':{'num':'05','suffix':'800001-899912'},
-    '16':{'num':'01','suffix':'400001-499912'},
-    '20':{'num':'01','suffix':'100001-199912'}
+    # '16':{'num':'01','suffix':'400001-499912'},
+    # '20':{'num':'01','suffix':'100001-199912'}
     }
 
 res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
@@ -53,18 +55,20 @@ verbose = False
 # default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
 regions_list = [
     # None
+    # ('countries',['United States of America','Mexico'])
     # ('continents',['South America']),
     # ('continents',['North America']),
     # ('subregions',['Nothern Europe','Southern Europe','Western Europe']),
     # ('continents',['Asia']),
     # ('continents',['Oceania']),
-    ('continents', ['Africa']),
+    # ('continents', ['Africa']),
     # ('countries',['China']),
     # ('countries',['United States of America']),
     # ('countries',['Canada']),
     # ('countries',['Australia']),
     # ('countries',['Brazil']),
     # ('countries',['France']),
+    # ('countries',['China']),
     # ('countries',['Bolivia']),
     # ('countries',['South Africa']),
     # ('countries',['Afghanistan'])
@@ -74,7 +78,7 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variogram model to try to fit
 model_name = 'spherical'
-maxlag = 5e6
+maxlag = 3e6
 nlags = 20
 
 # Naming convention of columns
@@ -248,6 +252,11 @@ for res_months,kyr,regions,trend,azimuth in iters :
             title = 'SISAL dataset'
             textbox_loc=(0.835, 0.65)
             legend_loc='upper right'
+
+        print('saving vario parameters')
+        with open(f'{fp}variogram_params_{key[1:]}.json', 'w') as filename:
+            json.dump(dict_dfs[key]['params'], filename)
+
         print('plotting and saving figure')
         fig,ax = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs[key]['df']['lag'].values,
                                                 gamma=dict_dfs[key]['df']['gamma'].values,
