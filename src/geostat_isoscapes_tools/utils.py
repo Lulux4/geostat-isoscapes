@@ -7,6 +7,9 @@ from pyproj import CRS
 from scipy.spatial.distance import cdist
 import subprocess
 import os
+import statsmodels.api as sm
+from statsmodels.regression.linear_model import OLS
+from scipy.linalg import lstsq
 
 ############################################
 # ROOT DIR RETRIEVAL
@@ -220,6 +223,51 @@ def apply_spatial_mask(df, spatial_mask, lat='lat', lon='lon',mask_col='mask'):
 # =========================================================================================
 # STATISTICAL METRICS
 # =========================================================================================
+def gvif(X_block : np.ndarray,X_rest : np.ndarray) :
+    """ Generalized Variance Inflation Factor (Fox & Monette 1992)
+    Scaled by 1/(2p) where p is the number of columns in the block of interest, in order
+    to compare GVIF value to other VIF values (d=1 GVIF=VIF)
+    """
+    # get number of predictors on the block of interest
+    p = X_block.shape[1]
+    # standardize columns 
+    X1 = standardize_matrix(X_block,cols=True)
+    X2 = standardize_matrix(X_rest,cols=True)
+
+    # compute (partial) correlation matrices
+    R11 = np.array(np.corrcoef(X1, rowvar=False), ndmin=2)
+    R22 = np.corrcoef(X2, rowvar=False)
+    R = np.corrcoef(np.append(X1, X2, axis=1), rowvar=False)
+    # compute gvif
+    gvif = np.linalg.det(R11) * np.linalg.det(R22) / np.linalg.det(R)
+    gvif = gvif ** (1/(2*p))
+    return gvif
+
+def standardize_matrix(X,cols=True):
+    """ Simple function to standardize matrix columns """
+    if cols :
+        ax = 0
+    else :
+        ax = 1
+    return (X - X.mean(axis=ax)) / np.sum(X,axis = ax)
+
+def partial_r2_block(y,X_full,X_rest):
+    """ Computes partial r2 by block of predictors
+    X_rest = X_full except the block 
+    y = response variable
+    """
+    # standardize columns 
+    y = standardize_matrix(y,cols=True)
+    X_full = standardize_matrix(X_full,cols=True)
+    X_rest = standardize_matrix(X_rest, cols=True)
+    
+    # fit models 
+    model_full = sm.OLS(y,X_full).fit()
+    model_reduced=sm.OLS(y,X_rest).fit()
+    r2_full = model_full.rsquared
+    r2_reduced = model_reduced.rsquared
+    return (r2_full-r2_reduced)/(1.-r2_reduced)
+
 def r2(y_true : np.ndarray, y_pred : np.ndarray, weights = None) -> float:
     """ Computes the R^2 between true and predicted values 
     """

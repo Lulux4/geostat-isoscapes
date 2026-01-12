@@ -114,7 +114,7 @@ def detrend_multiple_linear_regression(df_to_detrend,
     # Check that at least one predictor is included
     if len(X_cols)==0:
         raise ValueError('Must set at least one of the include_xxx parameters to True!')
-    X = df[X_cols].values
+    X = df[X_cols].values # X and X_cols are in the same order (1st col of X is 1st element of X_cols)
     y = df[value_col].values
     
     result_dict = fit_multiple_linear_model(X, y,X_cols)
@@ -127,24 +127,26 @@ def detrend_multiple_linear_regression(df_to_detrend,
 
     return df, result_dict
 
-def fit_multiple_linear_model(X, y,predictors):
+def fit_multiple_linear_model(exog, y,predictors):
     """
     Fits a multiple linear model.
     Computes partial R^2 for each predictor in the multiple linear model.
-    X: 2D array (n, p) of predictors
+    exog: 2D array (n, p) of predictors
     y: 1D array (n,)
+    predictors : list of the names of predictors in the same order as the X columns
     """
-    (n,p) = X.shape
+    (n,p) = exog.shape
 
     # add constant intercept
     # X_full = np.column_stack([np.ones(len(X)), X])
-    X_full = sm.add_constant(X)
+    X_full = sm.add_constant(exog,prepend=False) # add constant as last column of X
 
-    # model with all predictors
+    #======== model with all predictors =========
     model_full  = sm.OLS(y, X_full).fit()
     beta_full =  model_full.params
-    ssr_full = np.sum(model_full.resid**2)
-    sst = np.nansum((y - np.nanmean(y))**2)
+    # ============================================
+    # ssr_full = np.sum(model_full.resid**2)
+    # sst = np.nansum((y - np.nanmean(y))**2)
 
     # r2 and adjusted r2
     y_pred = model_full.fittedvalues
@@ -152,16 +154,16 @@ def fit_multiple_linear_model(X, y,predictors):
     full_r2 = utils.r2(y,y_pred)
     adj_r2 = utils.r2_adj(y,y_pred,p)
 
-    partial_r2 = {}
-    for j in range(X.shape[1]):
-        # Remove predictor j
-        X_reduced = np.delete(X_full, j+1, axis=1)
-        model_reduced = sm.OLS(y, X_reduced).fit()
-        ssr_reduced = np.sum(model_reduced.resid**2)
+    # partial_r2 = {}
+    # for j in range(X.shape[1]):
+    #     # Remove predictor j
+    #     X_reduced = np.delete(X_full, j+1, axis=1)
+    #     model_reduced = sm.OLS(y, X_reduced).fit()
+    #     ssr_reduced = np.sum(model_reduced.resid**2)
 
-        # Partial R square
-        r2_j = (ssr_reduced - ssr_full)/sst
-        partial_r2[predictors[j]] = r2_j
+    #     # Partial R square
+    #     r2_j = (ssr_reduced - ssr_full)/sst
+    #     partial_r2[predictors[j]] = r2_j
     
     # p-values and std
     p_values = dict(zip(["intercept"] + predictors, model_full.pvalues))
@@ -169,22 +171,41 @@ def fit_multiple_linear_model(X, y,predictors):
        
     # dict of results 
     result_dict = {'parameters':dict(zip(["intercept"] + predictors,beta_full)),
-                #    'y_pred':list(np.array(y_pred,dtype=float)),
-                #    'y_res': list(np.array(y_res,dtype=float)),
-                #    'y' : list(np.array(y,dtype=float)),
                    'mae':float(mae),
                    'parameters_std': coefficient_std,
                    'r2':float(full_r2),
                    'adj_r2': float(adj_r2),
-                   'partial r2': partial_r2,
                    'p':p_values,
                    }
-    # for the intercept, it makes no sense to compute vif or partial r2 
+    # compute partial r2 and GVIF metrics for all predictors or predictors blocks in the exogeneous variables
     if len(predictors)>1:
-        vif = {predictors[i]: variance_inflation_factor(X_full[:, 1:], i) for i in range(len(predictors)) } # bc we need to exclude the intercept
+        vif = {}
+        partial_r2 = {}
+        if ','.join(predictors).count('lat')==2:
+            predictors_latblock = [p for p in predictors if not ('lat' in p)]
+            lat_predictors = [p for p in predictors if ('lat' in p)]
+            predictors_latblock.append('latblock')
+        for pred in predictors_latblock:
+            if pred!='latblock' :
+                idx = [predictors.index(pred)]
+            else : 
+                idx = [predictors.index(pl) for pl in lat_predictors]
+            # vif
+            exog_block = exog[:,idx]
+            mask_exog = np.logical_and.reduce([np.arange(len(predictors)) != i for i in idx])
+            exog_rest = exog[:,mask_exog]
+            if exog_block.ndim==1 :
+                exog_block = exog_block[:,np.newaxis] # bc gvif expects a 2D array
+            vif[pred] = utils.gvif(exog_block,exog_rest) # (exclude the intercept in vif computations)
+            
+            # partial r2
+            mask_full = np.logical_and.reduce([np.arange(X_full.shape[1]) != i for i in idx])
+            partial_r2[pred] = utils.partial_r2_block(y,X_full,X_full[:,mask_full])
+        
         result_dict['vif']=vif
+        result_dict['partial r2']=partial_r2
         result_dict["vif"]["intercept"] = None
-    result_dict["partial r2"]["intercept"] = None
+        result_dict["partial r2"]["intercept"] = None
     
     return result_dict
 
@@ -889,9 +910,9 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
     if verbose : print(f'-> Adding external variables {variables}.')
     df = df_orig.copy()
     # check that latitude and longitudes are defined symetrically around 0° 
-    if any(df[lat])>90:
+    if any(df[lat]>90):
         df[lat]=utils.convert_lat_0_180_to_neg90_90(np.array(df[lat].values))
-    if any(df[lon])>180 :
+    if any(df[lon]>180) :
         df[lon]=utils.convert_lon_0_360_to_neg180_180(np.array(df[lon].values))
     
     # add columns with the variables specified in argument
