@@ -117,11 +117,11 @@ def detrend_multiple_linear_regression(df_to_detrend,
     X = df[X_cols].values # X and X_cols are in the same order (1st col of X is 1st element of X_cols)
     y = df[value_col].values
     
-    result_dict = fit_multiple_linear_model(X, y,X_cols)
+    result_dict = fit_multiple_linear_model(X,y,X_cols)
 
     beta = result_dict['parameters']
 
-    df['trend'] = beta['intercept'] + X @ np.array(list(beta.values()))[1:] 
+    df['trend'] = beta['intercept'] + X @ np.array(list(beta.values()))[:-1] # /!/ assumes beta['intercept'] is the last item in the dict
     # df['trend'] = result_dict['y_pred']
     df['residual'] = y - df['trend'].values
 
@@ -139,7 +139,7 @@ def fit_multiple_linear_model(exog, y,predictors):
 
     # add constant intercept
     # X_full = np.column_stack([np.ones(len(X)), X])
-    X_full = sm.add_constant(exog,prepend=False) # add constant as last column of X
+    X_full = sm.add_constant(exog,prepend=False) # add constant as the ***last*** column of X
 
     #======== model with all predictors =========
     model_full  = sm.OLS(y, X_full).fit()
@@ -170,7 +170,7 @@ def fit_multiple_linear_model(exog, y,predictors):
     coefficient_std = dict(zip(["intercept"] + predictors, model_full.bse))
        
     # dict of results 
-    result_dict = {'parameters':dict(zip(["intercept"] + predictors,beta_full)),
+    result_dict = {'parameters':dict(zip(predictors+["intercept"],beta_full)),
                    'mae':float(mae),
                    'parameters_std': coefficient_std,
                    'r2':float(full_r2),
@@ -219,11 +219,12 @@ def multiple_linear_result_dict_to_df(result_dict):
                     "std_error": result_dict["parameters_std"].values(),
                     "p_value": result_dict["p"].values(),
                 })
-                
+    
     if len(result_dict['parameters'])>2:
         vif = pd.DataFrame.from_dict(result_dict['vif'].items()).rename(columns={0:'name',1:'vif'})
         pr2 = pd.DataFrame.from_dict(result_dict["partial r2"].items()).rename(columns={0:'name',1:'partial r2'})
-        res_df = pd.merge(res_df,vif,on='name').merge(pr2,on='name')
+        metrics_df = vif.merge(pr2,on='name')
+        return res_df, metrics_df
     
     return res_df
 
