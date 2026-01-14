@@ -235,8 +235,8 @@ def gvif(X_block : np.ndarray,X_rest : np.ndarray) :
     X2 = standardize_matrix(X_rest,cols=True)
 
     # compute (partial) correlation matrices
-    R11 = np.array(np.corrcoef(X1, rowvar=False), ndmin=2)
-    R22 = np.corrcoef(X2, rowvar=False)
+    R11 = np.array(np.corrcoef(X1, rowvar=False), ndmin=2) # if X_block is 1D, R11 = 1.0 --> R11 = [[1.0]]
+    R22 = np.array(np.corrcoef(X2, rowvar=False), ndmin=2) # if X_rest is 1D, R22 = 1.0 --> R22 = [[1.0]]
     R = np.corrcoef(np.append(X1, X2, axis=1), rowvar=False)
     # compute gvif
     gvif = np.linalg.det(R11) * np.linalg.det(R22) / np.linalg.det(R)
