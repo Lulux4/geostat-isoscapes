@@ -19,6 +19,7 @@ itrace = True
 # PARAMETERS LISTS :
 
 mask_itrace_around_sisal_pts = False
+mask_radius = 25
 
 trends = [
     # 'multiple_linear_ele_D',
@@ -29,22 +30,22 @@ trends = [
     # 'multiple_linear_lat_D',
     # 'multiple_linear_lat_ele_D',
     
-    # 'multiple_linear_latabs_latReLU',
-    # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU_D',
-    # 'multiple_linear_latabs_latReLU_ele',
-    # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU',
+    'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_D',
+    'multiple_linear_latabs_latReLU_ele',
+    'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_ele_D',
-    # 'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
     ]
 
 azimuths = [None] # 0 45 90 180 # for directional variograms
 
 sims = { # simulation spec for itrace dataset
     '12':{'num':'05','suffix':'800001-899912'},
-    # '16':{'num':'01','suffix':'400001-499912'},
-    # '20':{'num':'01','suffix':'100001-199912'}
+    '16':{'num':'01','suffix':'400001-499912'},
+    '20':{'num':'01','suffix':'100001-199912'}
     }
 
 res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
@@ -54,7 +55,7 @@ verbose = False
 # geographical regions on which to mask itrace/sisal data for the variogram computations
 # default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
 regions_list = [
-    # None
+    None
     # ('countries',['United States of America','Mexico'])
     # ('continents',['South America']),
     # ('continents',['North America']),
@@ -78,7 +79,7 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variogram model to try to fit
 model_name = 'spherical'
-maxlag = 3e6
+maxlag = 1.2e7
 nlags = 20
 
 # Naming convention of columns
@@ -112,7 +113,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
         'trend':trend,
         'tolerance' : 22.5,
         'model_name' : model_name,
-        'mask radius [km]': 1000,
+        'mask radius [km]': mask_radius,
         'res [months]': res_months,
         'direction': azimuth,
         'regions':regions,
@@ -130,7 +131,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
     
         fp_itrace = f"{utils.get_project_root()}/output/variograms/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
         if mask_itrace_around_sisal_pts :
-            fp_itrace = fp_itrace + "sisal_mask/"
+            fp_itrace = fp_itrace + f"sisal_mask_{mask_radius}km/"
         else : 
             fp_itrace = fp_itrace + "no_mask/"
     if sisal : 
