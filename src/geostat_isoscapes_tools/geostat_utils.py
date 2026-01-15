@@ -182,10 +182,12 @@ def fit_multiple_linear_model(exog, y,predictors):
         vif = {}
         partial_r2 = {}
         if ','.join(predictors).count('lat')==2:
-            predictors_latblock = [p for p in predictors if not ('lat' in p)]
+            preds_with_blocks = [p for p in predictors if not ('lat' in p)]
             lat_predictors = [p for p in predictors if ('lat' in p)]
-            predictors_latblock.append('latblock')
-        for pred in predictors_latblock:
+            preds_with_blocks.append('latblock')
+        else : 
+            preds_with_blocks = predictors
+        for pred in preds_with_blocks:
             if pred!='latblock' :
                 idx = [predictors.index(pred)]
             else : 
@@ -712,7 +714,7 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
         - gammas : array
             Semivariances
         - model_name : str
-            'spherical', 'exponential', 'gaussian', or 'composite'
+            'spherical', 'exponential', 'gaussian', or any combination of these model names joined by a '+'
         - initial_params : list or None
             Starting guess for parameters
         - bounds : 2-tuple or None
