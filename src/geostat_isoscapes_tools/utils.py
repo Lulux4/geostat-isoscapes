@@ -162,6 +162,19 @@ def haversine(u, v):
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     return 2 * 6371 * np.arcsin(np.sqrt(a)) # since earth radius = approx 6371 km
 
+def canonical_lines(lines):
+    """ Lines is an array of shape N*2*2 (N lines consituted by a start point and an end point, each with 2 coordinates).
+    This function makes sure to order the end point and start points so that we can actually compare two sets of can
+    """
+    # lines: (N, 2, 2)
+    out = lines.copy()
+    swap = (
+        (lines[:, 0, 0] > lines[:, 1, 0]) |
+        ((lines[:, 0, 0] == lines[:, 1, 0]) &
+         (lines[:, 0, 1] > lines[:, 1, 1]))
+    )
+    out[swap, 0], out[swap, 1] = out[swap, 1], out[swap, 0]
+    return out
 
 def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | xr.DataArray,
                                      df_ref_pts : pd.DataFrame, 

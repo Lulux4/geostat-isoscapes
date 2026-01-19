@@ -86,11 +86,12 @@ def plot_isoscape_latlon_platecarree_df(
         ax.add_feature(country_borders, edgecolor='gray') # type:ignore
     ax.coastlines() # type:ignore
     valid = df.dropna(subset=[lat_col, lon_col, qty_col])
+    eps = 5
     ax.set_extent([         #type:ignore
-        valid[lon_col].min(),
-        valid[lon_col].max(),
-        valid[lat_col].min(),
-        valid[lat_col].max()
+        valid[lon_col].min()-eps,
+        valid[lon_col].max()+eps,
+        valid[lat_col].min()-eps,
+        valid[lat_col].max()+eps
     ], crs=ccrs.PlateCarree())
     ax.set_title(f"{title} - {time}")
 
@@ -404,3 +405,49 @@ def plot_ked_platecarree_points(lon_pred, lat_pred, z_pred, ss_pred,
     fig.suptitle(title, fontsize=15,y=0.94)
     # plt.tight_layout()
     return fig, axes
+
+
+def plot_interdistances_graph(locs_1,locs_2,title='Graph of point pairs'):
+    """
+    Plot the graph of pairs of points on a map, platecarree proj.    
+    Inputs :
+
+        - locs_1: array of shape (n,2) containing (longitude,latitude) coordinates of the first nodes of edges
+        - locs_2: array of shape (n,2) containing (longitude,latitude) coordinates of the second nodes of edges
+    """
+    proj = ccrs.PlateCarree()
+    
+    fig, ax = plt.subplots(
+        figsize=(10, 6),
+        subplot_kw=dict(projection=proj)
+    )
+    # Map background
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.8)#type:ignore
+    ax.add_feature(cfeature.BORDERS, linewidth=0.5)#type:ignore
+    ax.add_feature(cfeature.LAND, facecolor="#f0f0f0", alpha=0.5)#type:ignore
+    ax.add_feature(cfeature.OCEAN, facecolor="#dff4fd")#type:ignore
+
+    # Plot graph edges
+    for (lon1, lat1), (lon2, lat2) in zip(locs_1, locs_2):
+        ax.plot(
+            [lon1, lon2],
+            [lat1, lat2],
+            transform=ccrs.PlateCarree(),
+            linewidth=0.6,
+            alpha=0.4,
+            color="k"
+        )
+
+    # plot nodes
+    ax.scatter(
+        locs_1[:, 0], locs_1[:, 1],
+        s=5, color="red", transform=ccrs.PlateCarree(), zorder=3
+    )
+    ax.scatter(
+        locs_2[:, 0], locs_2[:, 1],
+        s=5, color="red", transform=ccrs.PlateCarree(), zorder=3
+    )
+
+    ax.set_title(title)
+
+    return fig,ax

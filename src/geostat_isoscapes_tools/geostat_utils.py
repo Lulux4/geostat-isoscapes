@@ -1,5 +1,6 @@
 
 from pyproj import Transformer
+from geostat_isoscapes_tools import plot_utils as putils
 import xarray as xr
 import numpy as np
 from scipy.spatial.distance import pdist
@@ -11,6 +12,8 @@ from scipy.optimize import curve_fit
 from tqdm import tqdm 
 import pandas as pd
 from . import utils,sisal_utils,variogram_models
+from skgstat.MetricSpace import MetricSpace
+from scipy.spatial.distance import squareform
 from scipy.interpolate import RegularGridInterpolator
 from shapely.geometry import Point
 from shapely.ops import nearest_points
@@ -323,8 +326,8 @@ def variogram_with_gstat(df : pd.DataFrame,
                          verbose : bool = True,
                          tolerance = 22.5,
                          x= 'x',
-                         y= 'y'
-                         ) :
+                         y= 'y',
+                         plot_interdistances_graph : bool = False) :
     """Compute experimental variogram with sampling.
     TODO : write this fct doc 
     """
@@ -349,7 +352,7 @@ def variogram_with_gstat(df : pd.DataFrame,
         # ==============
         if centers is None:
             V = skg.Variogram(
-                df[[x,y]].values,
+                df[[x,y]].values,#type:ignore
                 vals,
                 n_lags=nlags,
                 # normalize=True,
@@ -398,12 +401,55 @@ def variogram_with_gstat(df : pd.DataFrame,
                     use_nugget=True,
                     azimuth=direction, #type:ignore
                     tolerance = tolerance )
-        
-    if return_Variogram_object:
-        return V, trend_results
-    else :
-        return V.bins, V.experimental, V.bin_count,V.fitted_model, trend_results
     
+    # plot a graph of interdistances
+    fig,ax = None,None
+    if plot_interdistances_graph :
+        width = V.bins[1]-V.bins[0]
+        lonlat_array = np.array(df[['lon','lat']].values)
+        distances = MetricSpace(df[[x,y]].values,'euclidean').dists
+        for b in V.bins :
+            min_d = b - width
+            max_d=b
+            mask = (distances > min_d)&(distances < max_d)
+            i,j = np.where(mask & np.triu(np.ones_like(distances,dtype=bool),k=1))
+            locs_i = lonlat_array[i]
+            locs_j = lonlat_array[j]
+            title = f'Graph of pairs separated by interdistances between {min_d : .2E}m and {max_d : .2E}m.'
+            if direction is None :
+                fig,ax = putils.plot_interdistances_graph(locs_1=locs_i,locs_2=locs_j,title=title)
+            else :
+                direction_mask = squareform(V._direction_mask()) # type:ignore
+                r = np.arange(len(lonlat_array))
+                idx1, idx2 = np.meshgrid(r, r)
+                pts_1 = lonlat_array[idx1[direction_mask]] # type:ignore
+                pts_2 = lonlat_array[idx2[direction_mask]]# type:ignore
+                
+                lines_dir = utils.canonical_lines(np.column_stack((
+                    pts_1.reshape(len(pts_1), 1, 2),
+                    pts_2.reshape(len(pts_2), 1, 2)
+                )))
+                lines_dir = lines_dir.reshape(len(lines_dir),4)
+                
+                lines_undir = utils.canonical_lines(np.column_stack((
+                    locs_i.reshape(len(locs_i), 1, 2),
+                    locs_j.reshape(len(locs_j), 1, 2)
+                )))
+                lines_undir = lines_undir.reshape(len(lines_undir),4)
+                
+                # make numpy view the rows as 1 entity (to avoid element wise comparison later)
+                lines_dir_view = lines_dir.view([('',lines_dir.dtype)]*lines_dir.shape[1]) 
+                lines_undir_view = lines_undir.view([('',lines_undir.dtype)]*lines_undir.shape[1]) 
+                common = np.intersect1d(lines_undir_view,lines_dir_view).view(lines_dir.dtype).reshape(-1,2,2)
+                pts_start = common[:, 0, :]
+                pts_end   = common[:, 1, :]
+                fig,ax = putils.plot_interdistances_graph(locs_1=pts_start,locs_2=pts_end,title = title+f', direction={direction}°.')
+                
+    if return_Variogram_object:
+        return V, trend_results, (fig,ax)
+    else :
+        return V.bins, V.experimental, V.bin_count,V.fitted_model, trend_results,(fig,ax)
+
 def make_fixed_bin_func(centers):
     ''' returns a function with returning the (given) centers and associated edges, no matter the args provided.
     '''
@@ -587,7 +633,7 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
         try:
             if verbose : print(f'   computing semivariances of the {quantity}, df has length {len(df)}')
             if ref_bins is None:
-                b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type: ignore
+                b, g_exp, bin_count, _,_,_ = variogram_with_gstat(df,                  # type: ignore
                                                             quantity=quantity,
                                                             trend=trend,
                                                             maxlag=maxlag,
@@ -597,11 +643,12 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
                                                             return_Variogram_object=False,
                                                             verbose=verbose,
                                                             x='x',
-                                                            y='y'
+                                                            y='y',
+                                                            plot_interdistances_graph=False
                                                         )
                 ref_bins = np.array(b)
             else:
-                b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type:ignore
+                b, g_exp, bin_count, _,_,_ = variogram_with_gstat(df,                  # type:ignore
                                                             quantity=quantity,
                                                             direction=direction,
                                                             tolerance = tolerance,
@@ -610,7 +657,8 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
                                                             return_Variogram_object=False,
                                                             verbose=verbose,
                                                             x='x',
-                                                            y='y'
+                                                            y='y',
+                                                            plot_interdistances_graph=False
                                                         )
 
             bin_counts.append(bin_count)

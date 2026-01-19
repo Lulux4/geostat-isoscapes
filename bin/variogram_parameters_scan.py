@@ -13,13 +13,13 @@ sns.set_style('dark')
 ###############################################
 
 # DATASETS TO STUDY :
-sisal = False
-itrace = True
+sisal = True
+itrace = False
 
 # PARAMETERS LISTS :
 
 mask_itrace_around_sisal_pts = False
-mask_radius = 25
+mask_radius = 10
 
 trends = [
     # 'multiple_linear_ele_D',
@@ -30,25 +30,26 @@ trends = [
     # 'multiple_linear_lat_D',
     # 'multiple_linear_lat_ele_D',
     
-    'multiple_linear_latabs_latReLU',
-    'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_latabs_latReLU_D',
-    'multiple_linear_latabs_latReLU_ele',
-    'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU',
+    # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_D',
+    # 'multiple_linear_latabs_latReLU_ele',
+    # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_latabs_latReLU_ele_D',
-    'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
     ]
 
 azimuths = [None] # 0 45 90 180 # for directional variograms
 
 sims = { # simulation spec for itrace dataset
-    '12':{'num':'05','suffix':'800001-899912'},
-    '16':{'num':'01','suffix':'400001-499912'},
-    '20':{'num':'01','suffix':'100001-199912'}
+    '1':{} # dummy entry for sisal only, to get first 1000 years BP
+    # '12':{'num':'05','suffix':'800001-899912'},
+    # '16':{'num':'01','suffix':'400001-499912'},
+    # '20':{'num':'01','suffix':'100001-199912'}
     }
 
-res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
+res_months_list = [12*1000] # min resolution is 12 months if using sisal, 1 month if using itrace
 
 verbose = False
 
@@ -56,6 +57,7 @@ verbose = False
 # default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
 regions_list = [
     None
+    # ('continents',['South America','North America','Europe','Asia','Oceania','Africa'])
     # ('countries',['United States of America','Mexico'])
     # ('continents',['South America']),
     # ('continents',['North America']),
@@ -79,17 +81,14 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variogram model to try to fit
 model_name = 'spherical'
-maxlag = 1.2e7
-nlags = 20
+maxlag = 12e6
+nlags = 10
 
 # Naming convention of columns
 data_cols = {'lat':'lat',
             'lon':'lon',
             'quantity':'d18Op'}
 cols_sisal = ['binned_age','lat','lon','site_id','d18Op_VSMOW_exactconv']
-
-# We already load sisal data (unless we want to loop on the temporal resolution)
-
 
 # Prepare the iterations 
 iters = itertools.product(res_months_list,sims.keys(),regions_list,trends,azimuths)
