@@ -327,7 +327,9 @@ def variogram_with_gstat(df : pd.DataFrame,
                          tolerance = 22.5,
                          x= 'x',
                          y= 'y',
-                         plot_interdistances_graph : bool = False) :
+                         plot_interdistances_graph : bool = False,
+                         save_interdistances_graphs : str| None = None,
+                         bin_func ='even') :
     """Compute experimental variogram with sampling.
     TODO : write this fct doc 
     """
@@ -335,7 +337,8 @@ def variogram_with_gstat(df : pd.DataFrame,
     if len(df) > sample_size:
         # print('downsampling')
         df = df.sample(sample_size, random_state=seed)
-    
+    else: 
+        if verbose : print('Computing variogram on a field of',len(df), ' points.')
     vals = df[quantity].values
 
     trend_results = None
@@ -358,6 +361,7 @@ def variogram_with_gstat(df : pd.DataFrame,
                 # normalize=True,
                 maxlag=maxlag,
                 model=model,
+                bin_func=bin_func,
                 use_nugget=True
             )
         # ==============
@@ -387,6 +391,7 @@ def variogram_with_gstat(df : pd.DataFrame,
                     maxlag=maxlag,
                     model=model,
                     use_nugget=True,
+                    bin_func=bin_func,
                     azimuth=direction, #type:ignore
                     tolerance = tolerance )
         # ==============
@@ -405,17 +410,17 @@ def variogram_with_gstat(df : pd.DataFrame,
     # plot a graph of interdistances
     fig,ax = None,None
     if plot_interdistances_graph :
-        width = V.bins[1]-V.bins[0]
         lonlat_array = np.array(df[['lon','lat']].values)
         distances = MetricSpace(df[[x,y]].values,'euclidean').dists
+        max_d=0
         for b in V.bins :
-            min_d = b - width
-            max_d=b
+            min_d = max_d # previous val of max_d = minimum val of this class
+            max_d = b
             mask = (distances > min_d)&(distances < max_d)
             i,j = np.where(mask & np.triu(np.ones_like(distances,dtype=bool),k=1))
             locs_i = lonlat_array[i]
             locs_j = lonlat_array[j]
-            title = f'Graph of pairs separated by interdistances between {min_d : .2E}m and {max_d : .2E}m.'
+            title = f'Graph of the {len(locs_i)} pairs with interdistances between {min_d : .2E}m and {max_d : .2E}m.'
             if direction is None :
                 fig,ax = putils.plot_interdistances_graph(locs_1=locs_i,locs_2=locs_j,title=title)
             else :
@@ -444,11 +449,13 @@ def variogram_with_gstat(df : pd.DataFrame,
                 pts_start = common[:, 0, :]
                 pts_end   = common[:, 1, :]
                 fig,ax = putils.plot_interdistances_graph(locs_1=pts_start,locs_2=pts_end,title = title+f', direction={direction}°.')
-                
+            if save_interdistances_graphs is not None :
+                fig.savefig(save_interdistances_graphs+f'lags_{int(min_d)}_{int(max_d)}m.png')
+
     if return_Variogram_object:
-        return V, trend_results, (fig,ax)
+        return V, trend_results
     else :
-        return V.bins, V.experimental, V.bin_count,V.fitted_model, trend_results,(fig,ax)
+        return V.bins, V.experimental, V.bin_count,V.fitted_model, trend_results
 
 def make_fixed_bin_func(centers):
     ''' returns a function with returning the (given) centers and associated edges, no matter the args provided.
@@ -532,6 +539,7 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
                                     trend : str| None = None,
                                     maxlag : float | None | str = None,
                                     nlags : int = 20,
+                                    bin_func : str = 'even',
                                     mask : pd.DataFrame | None = None,
                                     trend_before_masking : bool = True,
                                     lat: str = 'lat',
@@ -633,11 +641,12 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
         try:
             if verbose : print(f'   computing semivariances of the {quantity}, df has length {len(df)}')
             if ref_bins is None:
-                b, g_exp, bin_count, _,_,_ = variogram_with_gstat(df,                  # type: ignore
+                b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type: ignore
                                                             quantity=quantity,
                                                             trend=trend,
                                                             maxlag=maxlag,
                                                             nlags=nlags,
+                                                            bin_func=bin_func,
                                                             direction=direction,
                                                             tolerance = tolerance,
                                                             return_Variogram_object=False,
@@ -648,7 +657,7 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
                                                         )
                 ref_bins = np.array(b)
             else:
-                b, g_exp, bin_count, _,_,_ = variogram_with_gstat(df,                  # type:ignore
+                b, g_exp, bin_count, _,_ = variogram_with_gstat(df,                  # type:ignore
                                                             quantity=quantity,
                                                             direction=direction,
                                                             tolerance = tolerance,
@@ -714,6 +723,17 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
             if verbose : print('> done')
         elif type(mask) == pd.DataFrame :
             mask_df = mask
+        else: 
+            raise TypeError('mask is not of type xr datarray or pd dataframe!')
+        
+        if config_dict['plot_mask'] :
+                if any(mask_df['lon']>180):
+                    mask_df['lon_negpos']=utils.convert_lon_0_360_to_neg180_180(np.asarray(mask_df.lon.values))
+                    lon_col='lon_negpos'
+                else :
+                    lon_col='lon'
+                _ = putils.plot_global_map(mask_df[mask_df['mask']==True],'masked data, r=50km','mask','mask','',lon_col=lon_col,lat_col='lat',save_fig=f'{fp}mask_sisal.html')
+               
     # Loop over the different time slices to compute the each variogram
     if verbose : print('Start variogram computation iterations')
     bin_count,gammas, ref_bins, results_dict = iterative_variogram_computations(data,
@@ -721,6 +741,7 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                                                                                 trend = config_dict['trend'],
                                                                                 maxlag = config_dict['maxlag'],
                                                                                 nlags = config_dict['nlags'],
+                                                                                bin_func=config_dict['bin_func'],
                                                                                 mask = mask_df,
                                                                                 ref_bins = config_dict['centers'],
                                                                                 direction = config_dict['direction'],

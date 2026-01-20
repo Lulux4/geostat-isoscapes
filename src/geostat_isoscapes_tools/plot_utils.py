@@ -1,5 +1,6 @@
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import seaborn as sns
 import matplotlib.pyplot as plt 
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
@@ -10,6 +11,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.axes import Axes
+import matplotlib.gridspec as gridspec
+from collections import OrderedDict
 
 def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
@@ -123,98 +126,155 @@ def plot_projected_data(coords_proj,vals_s, projection_str='Mercator',robust=Tru
         
     return fig, ax
 
-def plot_variogram_from_bins_and_gamma(centers : np.ndarray,
+def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
                                        gamma : np.ndarray,
-                                       time : str, 
+                                       title : str, 
                                        counts : np.ndarray | None = None, 
                                        std_counts=None,
-                                       min_pairs=30, 
                                        plot_model : bool = True, 
                                        model_name : str|None = None, 
                                        model_fct = None,
                                        model_params = None,
-                                       figsize: tuple[int,int]=(10,5),
-                                       textbox_loc = (0.835, 0.22),
-                                       legend_loc='lower right',
+                                       figsize: tuple[int,int]=(15,5),
+                                       textbox_loc = (0.05,0.4),
                                        ax_ = None,
-                                       save_name : str | None = None,
-                                       verbose : bool =  False
+                                       save_name : str | None = None,                                      
                                        ) -> tuple[Figure,Axes] | Axes | tuple:
     """ Plot an empirical variogram from given bin centers and semivariances values.
     Overlays pairs number per bin if counts is given. Does not plot bins with less than min_pairs if counts is given.
     """
-    if counts is not None :
-        reliable = counts >= min_pairs
-        centers = centers[reliable]
-        if all(~ reliable):
-            print('All bins have less than {min_pairs} items, we cannot produce a reliable variogram.')
-            return (None,None)
-        gamma = gamma[reliable]
-        counts = counts[reliable]
-    if ax_ is None :
-        fig, ax = plt.subplots(figsize=figsize)
-    else :
-        ax = ax_
+    # Seaborn theme
+    sns.set_theme(context='talk',
+                  style='ticks',
+                  palette='colorblind',
+                  rc={'axes.linewidth':1.2,"grid.alpha":0.3,"grid.linestyle":'--'})
     
-    ax.plot(centers, gamma, 'o--', color='C0',linewidth=1,markersize=4)
-    
+    # Define bin centers :
+    bin_centers = bin_edges - np.r_[bin_edges[0],np.diff(bin_edges)]/2
 
-    # Overlay model if wanted and given
+    # Create the fig/ax on which to plot
+    if ax_ is None:
+        fig = plt.figure(figsize=figsize)
+        gs = gridspec.GridSpec(
+            nrows=1,
+            ncols=2,
+            width_ratios=[3.2, 1.2],
+            wspace=0.2
+        )
+        ax = fig.add_subplot(gs[0, 0])
+        ax_info = fig.add_subplot(gs[0, 1])
+    else:
+        ax = ax_
+        ax_info = None
+    colors=sns.color_palette('colorblind')
+    
+    # Empirical vario 
+    ax.plot(bin_edges, #(gstat logic is to work with bin edges rather than centers)
+            gamma,
+            marker='o',
+            linewidth=1.5,
+            linestyle='--',
+            markersize=5,
+            color=colors[0],
+            label='Empirical variogram',
+            zorder=3)
+    
+    # Overlay the vario model is given
     if (plot_model) and (model_name is not None) and (model_fct is not None):
-        if verbose : print('plotting model')
-        h = np.arange(0,centers.max(),10000)
-        legend_model = model_name 
-        ax.plot(h,model_fct(h),'-', color='C1', linewidth=1, label=f'{legend_model} fit')
+        h = np.linspace(0,bin_edges.max(),300)
+        ax.plot(h,
+                model_fct(h),
+                linestyle='-',
+                color=colors[1],
+                linewidth=2,
+                label=f'{model_name} fit',
+                zorder=4)
+        # retrieve the fit parameters for drawing associated lines and legend
         sill,range_,nugget= None,None,None
-        
-        if (not ('+' in model_name)) and (model_params is not None) :
-            range_ = model_params['range']
-            nugget =np.exp(model_params['nugget_ln'])
-            sill = np.exp(model_params['sill_ln'])+nugget
-            ax.vlines(range_,0,max(gamma),color="#FF1E00",linestyle='--',alpha=0.2,label=f"range")
-            ax.hlines(sill,0,max(centers),color="#BD6D12",linestyle='--',alpha=0.2,label=f"sill")
-        
-        elif ('+' in model_name) and (model_params is not None) :
-            range_ = gutils.effective_range(centers,model_fct,0.95)
-            nugget= np.exp(model_params['nugget_ln'])
-            sill = np.exp(model_params['sill1'])+np.exp(model_params['sill2'])+nugget
-            ax.vlines(range_,0,max(gamma),color='#FF1E00',linestyle='--',alpha=0.2,label=f'effective range')
-            ax.hlines(sill,0,max(centers),color='#BD6D12',linestyle='--',alpha=0.2,label=f"total sill")
-        if (range_ is not None) & (sill is not None) & (nugget is not None):
+        if model_params is not None :
+            if not ('+' in model_name):
+                range_ = model_params['range']
+                nugget =np.exp(model_params['nugget_ln'])
+                sill = np.exp(model_params['sill_ln'])+nugget
+                ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label="Range")
+                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Sill")
+            else:
+                range_ = gutils.effective_range(bin_edges,model_fct,0.95)
+                nugget= np.exp(model_params['nugget_ln'])
+                sill = np.exp(model_params['sill1'])+np.exp(model_params['sill2'])+nugget
+                ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label='Effective range')
+                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Total sill")
+        if (ax_info is not None) & (range_ is not None) & (sill is not None) & (nugget is not None):
             weights = None
             if counts is not None : 
                 weights = gutils.get_weights_from_pair_counts(counts)
-            r2 = utils.r2(gamma, model_fct(centers), weights=weights)
-            textstr = f"Range: {range_:.2e} m\nSill: {sill:.2f} ‰²\nNugget: {nugget:.2f} ‰²\nR²: {r2:.2f}"
-            ax.text(textbox_loc[0],textbox_loc[1], textstr,
-                    transform=ax.transAxes,
-                    fontsize=10,
-                    verticalalignment='bottom',
-                    horizontalalignment='left',
-                    bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.8)
-                    )
-        if ax_ is None : plt.legend(loc=legend_loc)
-    
-    width = centers[1]-centers[0]
+            r2 = utils.r2(gamma, model_fct(bin_edges), weights=weights)
+            textstr = rf"$\bf{{Range:}}$ {range_:.2e}m""\n"rf"$\bf{{Sill:}}$ {sill:.2f}‰$^2$""\n"rf"$\bf{{Nugget:}}$ {nugget:.2f}‰$^2$""\n"rf"$\bf{{R^2:}}$ {r2:.2f}"
+    # Compute widths :
+    widths = np.diff(bin_edges)
+    widths = np.r_[bin_edges[0],widths]
+
     # Overlay bins counts if given
     if counts is not None:
-        # Overlay pair counts
         ax2 = ax.twinx()
-        ax2.bar(centers, counts, width = width,
-                color='red', alpha=0.1, label='Pair counts')
-        ax2.set_ylabel('Number of pairs', color='red')
-        ax2.tick_params(axis='y', labelcolor='red')
+        ax2.bar(bin_centers,
+                counts,
+                width = widths,
+                color=colors[0],
+                alpha=0.15,
+                align='center',
+                label='Pair counts',
+                zorder=1)
+        ax2.set_ylabel('Number of pairs',color=colors[0])
+        ax2.tick_params(axis='y', colors=colors[0])   
+        ax2.spines['right'].set_color(colors[0]) 
+        ax2.grid(False)
         if std_counts is not None :
-            ax2.bar(centers, std_counts, width = width,
-                    color='blue', alpha=0.1, label='Pair counts std')
-    ax.set_xlim(0, centers.max()+width)
+            ax2.bar(bin_centers,
+                    std_counts,
+                    width = widths,
+                    color=colors[1],
+                    alpha=0.15,
+                    label='Pair counts std',
+                    zorder=1)
+    # axes format
+    ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
     ax.grid(True, alpha=0.4)
-    ax.set_xlabel("Lag distance [m]")
+    ax.set_xlabel("Interdistance [m]")
     ax.set_ylabel("Semivariance [‰²]")
-    
+    sns.despine(ax=ax, top=True, right=True)
+    if counts is not None :
+        sns.despine(ax=ax2, top=True, right=False)
+
+    if ax_info is not None:
+        if counts is not None:
+            h1, l1 = ax.get_legend_handles_labels()
+            h2, l2 = ax2.get_legend_handles_labels()
+            handles = h1 + h2
+            labels = l1 + l2
+        else:
+            handles, labels = ax.get_legend_handles_labels()
+        # Remove duplicates 
+        by_label = OrderedDict(zip(labels, handles))
+        ax_info.legend(
+            by_label.values(),
+            by_label.keys(),
+            loc="upper left",
+            frameon=False,
+            fontsize=12,
+        )
+        ax_info.text(textbox_loc[0],textbox_loc[1], textstr, # type:ignore
+                    transform=ax_info.transAxes,
+                    fontsize=12,
+                    va='bottom',
+                    ha='left',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.85)
+                    )
+        ax_info.axis('off')
+        
     if ax_ is None :
-        plt.title(f"Empirical variogram - {time}")
+        plt.title(f"Empirical variogram {title}")
         if save_name is not None:
             plt.savefig(save_name,dpi=500,bbox_inches='tight')
         return fig,ax
@@ -271,7 +331,8 @@ def plot_global_map(data:pd.DataFrame,
                     lat_col : str = 'latitude',
                     colorscale : str ='plasma',
                     landcolor="#fffafa",
-                    oceancolor="#83d0f1")-> go.Figure:
+                    oceancolor="#83d0f1",
+                    save_fig : str|None =None)-> go.Figure:
     ''' 3D or flat earth (natural earth proj)
     If proj=True : 2D 
     else : 3D
@@ -337,6 +398,8 @@ def plot_global_map(data:pd.DataFrame,
             margin=dict(r=20, l=20, t=50, b=20),
             template="plotly_white"
     )
+    if save_fig is not None:
+        fig.write_html(save_fig, include_plotlyjs="cdn")
     return fig
 
 def plot_ked_platecarree_points(lon_pred, lat_pred, z_pred, ss_pred,
@@ -437,17 +500,9 @@ def plot_interdistances_graph(locs_1,locs_2,title='Graph of point pairs'):
             alpha=0.4,
             color="k"
         )
-
     # plot nodes
-    ax.scatter(
-        locs_1[:, 0], locs_1[:, 1],
-        s=5, color="red", transform=ccrs.PlateCarree(), zorder=3
-    )
-    ax.scatter(
-        locs_2[:, 0], locs_2[:, 1],
-        s=5, color="red", transform=ccrs.PlateCarree(), zorder=3
-    )
-
-    ax.set_title(title)
+    ax.scatter(locs_1[:, 0], locs_1[:, 1],s=5, color="red", transform=ccrs.PlateCarree(), zorder=3)
+    ax.scatter(locs_2[:, 0], locs_2[:, 1],s=5, color="red", transform=ccrs.PlateCarree(), zorder=3)
+    ax.set_title(title, fontdict={'fontsize':12})
 
     return fig,ax

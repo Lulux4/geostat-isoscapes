@@ -13,13 +13,13 @@ sns.set_style('dark')
 ###############################################
 
 # DATASETS TO STUDY :
-sisal = True
-itrace = False
+sisal = False
+itrace = True
 
 # PARAMETERS LISTS :
 
-mask_itrace_around_sisal_pts = False
-mask_radius = 10
+mask_itrace_around_sisal_pts = True
+mask_radius = 400
 
 trends = [
     # 'multiple_linear_ele_D',
@@ -29,7 +29,7 @@ trends = [
     # 'multiple_linear_lat_ele',
     # 'multiple_linear_lat_D',
     # 'multiple_linear_lat_ele_D',
-    
+    # None
     # 'multiple_linear_latabs_latReLU',
     # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
     # 'multiple_linear_latabs_latReLU_D',
@@ -43,13 +43,13 @@ trends = [
 azimuths = [None] # 0 45 90 180 # for directional variograms
 
 sims = { # simulation spec for itrace dataset
-    '1':{} # dummy entry for sisal only, to get first 1000 years BP
-    # '12':{'num':'05','suffix':'800001-899912'},
-    # '16':{'num':'01','suffix':'400001-499912'},
-    # '20':{'num':'01','suffix':'100001-199912'}
+    # '1':{}, # dummy entry for sisal only, to keep all times
+    '12':{'num':'05','suffix':'800001-899912'},
+    '16':{'num':'01','suffix':'400001-499912'},
+    '20':{'num':'01','suffix':'100001-199912'}
     }
 
-res_months_list = [12*1000] # min resolution is 12 months if using sisal, 1 month if using itrace
+res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
 
 verbose = False
 
@@ -81,8 +81,9 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variogram model to try to fit
 model_name = 'spherical'
-maxlag = 12e6
+maxlag = 8.5e6
 nlags = 10
+bin_func = 'uniform'
 
 # Naming convention of columns
 data_cols = {'lat':'lat',
@@ -108,11 +109,13 @@ for res_months,kyr,regions,trend,azimuth in iters :
         'trend_before_mask': True,
         'maxlag': maxlag,
         'nlags': nlags,
+        'bin_func':bin_func,
         'centers': None,
         'trend':trend,
         'tolerance' : 22.5,
         'model_name' : model_name,
         'mask radius [km]': mask_radius,
+        'plot_mask':True,
         'res [months]': res_months,
         'direction': azimuth,
         'regions':regions,
@@ -162,10 +165,9 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                                     verbose=verbose)
         sisal_df = sisal_df_global
         sisal_change = True
-        init=False
-
+        init=False # even if res changes again, we will not need to reload sisal for adapting the mask
     # 2. If region changed, truncate the global df 
-    if sisal & ((regions!=tmp_regions) | sisal_change) & (regions is not None) : 
+    if (sisal | mask_itrace_around_sisal_pts) & ((regions!=tmp_regions) | sisal_change) & (regions is not None) : 
         print('----- New sisal upper-level param res was set, or new regions params is detected : applying a new mask to sisal global df')
         sisal_df_regions = utils.mask_regions_shape(sisal_df_global,buffer_km=buffer_km,regions=regions) # type:ignore
         sisal_df = sisal_df_regions
@@ -173,10 +175,13 @@ for res_months,kyr,regions,trend,azimuth in iters :
 
     # 3. If the temporal slice (kyr) is not the same as previous iteration, 
     #    we just need to take the right slice of sisal data (no reload)
-    if sisal & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res_months)) | sisal_change) :
+    if (sisal | mask_itrace_around_sisal_pts) & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res_months)) | sisal_change) :
         print('----- New sisal upper-level params region or res was set, or new temporal slice param detected : taking the new slice from sisal df')
-        sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
-        
+        if kyr!='all':
+            sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
+        else :
+            sisal_df_valid = sisal_df.rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() # type:ignore
+
     # 4. For itrace, we need to reload in any case since we cannot load several slices at the smae time
     itrace_change = False
     if itrace & ((tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months)): 
@@ -215,7 +220,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                 fp=fp_itrace,
                                                 config_dict=itrace_params,
                                                 data_cols=data_cols,
-                                                mask_pts = sisal_df if mask_itrace_around_sisal_pts else None, # type:ignore # TODO : sisal_df_valid or region? depends on the needs, be careful
+                                                mask_pts = sisal_df_valid if mask_itrace_around_sisal_pts else None, # type:ignore # TODO : sisal_df_valid or region? depends on the needs, be careful
                                                 verbose = verbose
                                             )
     if sisal :
@@ -245,31 +250,23 @@ for res_months,kyr,regions,trend,azimuth in iters :
         if key.startswith('i'):
             fp = fp_itrace
             title = 'iTrace dataset'
-            textbox_loc=(0.835, 0.25)
-            legend_loc='lower right'
         else : 
             fp = fp_sisal
             title = 'SISAL dataset'
-            textbox_loc=(0.835, 0.65)
-            legend_loc='upper right'
 
         print('saving vario parameters')
         with open(f'{fp}variogram_params_{key[1:]}.json', 'w') as filename:
             json.dump(dict_dfs[key]['params'], filename)
 
         print('plotting and saving figure')
-        fig,ax = putils.plot_variogram_from_bins_and_gamma(centers=dict_dfs[key]['df']['lag'].values,
+        fig,ax = putils.plot_variogram_from_bins_and_gamma(bin_edges=dict_dfs[key]['df']['lag'].values,
                                                 gamma=dict_dfs[key]['df']['gamma'].values,
-                                                time=f'{title} - {int(kyr)-1} to {kyr} kyr BP',
+                                                title=f'- {title} - {int(kyr)-1} to {kyr} kyr BP' if kyr !='all' else 'all times',
                                                 counts=dict_dfs[key]['df']['count'].values,
-                                                min_pairs=20,
                                                 plot_model=True,
                                                 model_name=model_name,
                                                 model_fct=dict_dfs[key]['fct_fitted'],
                                                 model_params=dict_dfs[key]['params'],
-                                                figsize=(10,5),
-                                                textbox_loc=textbox_loc,
-                                                legend_loc=legend_loc,
                                                 save_name=f'{fp}fig_{key[1:]}.png'
                                                 ) # type:ignore
 
