@@ -146,8 +146,12 @@ def mask_regions_shape(da : xr.DataArray | xr.Dataset | pd.DataFrame,
         raise TypeError("Input must be an xarray.DataArray, xr.Dataset or pandas.DataFrame")
 
 def convert_lon_0_360_to_neg180_180(lon:np.ndarray) ->np.ndarray:
-    """ Converts longuitudes in the interval O to 360 degreees to -180 to 180 degrees"""
+    """ Converts longitudes in the interval O to 360 degreees to -180 to 180 degrees"""
     return (lon + 180) % 360 -180
+
+def convert_lon_neg180_180_to_0_360(lon:np.ndarray) ->np.ndarray:
+    """ Converts longitudes in the interval -180 to 180 degreees to 0 to 360 degrees"""
+    return lon % 360
 
 def convert_lat_0_180_to_neg90_90(lat:np.ndarray) ->np.ndarray:
     """ Converts latitudes in the interval 0 to 180 degreees to -90 to 90 degrees"""
@@ -213,6 +217,8 @@ def mask_union_of_circles_around_pts(data_to_mask : pd.DataFrame | xr.Dataset | 
         # points to mask (extraction)
         lats = data_to_mask[lat_name].values
         lons = data_to_mask[lon_name].values
+        if max(lons)>180:
+            ref_locs[:,1]=convert_lon_neg180_180_to_0_360(ref_locs[:,1])
         lon2d, lat2d = np.meshgrid(lons,lats)
         locs = np.column_stack([lat2d.ravel(), lon2d.ravel()])  # (nlat*nlon, 2)
         # compute dist
