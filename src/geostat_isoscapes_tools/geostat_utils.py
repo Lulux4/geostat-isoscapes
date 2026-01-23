@@ -19,8 +19,11 @@ from shapely.geometry import Point
 from shapely.ops import nearest_points
 import geopandas as gpd
 import statsmodels.api as sm
+from scipy.stats import norm, pearsonr
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import json 
+from scipy.spatial import cKDTree # type: ignore
+from pykrige.uk import UniversalKriging
 
 # ==========================================================
 # Coordinates projections 
@@ -968,6 +971,136 @@ def get_preprocessed_itrace_data(res=None,
             print('done')
             return d18_df
 
+def ked(df_to_krige : pd.DataFrame,
+        df_ext_drift : pd.DataFrame,
+        lat = 'lat',
+        lon = 'lon',
+        qty ='d18Op',
+        variogram_model : str = 'spherical',
+        variogram_parameters : dict|None = None,
+        cv_mask : np.ndarray | None = None
+        ):
+    """ Prepare and execute KED from the dataframe containing the points to krige and the df containing the external drift points.
+    The procedure is the following  : 
+        1. project all data in mercator coords 
+        2. retrieve the ext drift values at observation points
+        3. execute the KED
+    It is also possible to predict on validation points : observation locations that are removed from the df_to_krige set.
+
+    Inputs :
+        - df_to_krige : pd.DataFrame containing columns lat,lon and qty
+        - df_ext_drift : pd.DataFrame containing columns lat,lon and qty as well
+        - lon : name of the column containing longitudes 
+        - lat : name of the col containing latitudes 
+        - qty : name of the column containing the quantity to krige 
+        - cv_mask : None or array. If defined, it provides the mask to apply to df_to_krige in order to obtain the observations on which to validate the kriging.
+    Outputs :
+        - df_pred : a dataframe containing columns lon,lat, the predictions z_pred and the associated variance ss_pred. If cross validation mask was provided, it also include the observation values at the val points.
+    """
+    # PROJECT IN MERCATOR COORDS
+    df_to_krige['x'],df_to_krige['y'] = project_coords(df_to_krige[lon].values,df_to_krige[lat].values)
+    df_ext_drift['x'],df_ext_drift['y'] = project_coords(df_ext_drift[lon].values,df_ext_drift[lat].values)
+        
+    # Prepare cKDTree for retrieving the value of the external drift at observation points.
+    lats_obs = df_to_krige[lat]
+    lons_obs  = df_to_krige[lon]
+    grid_points = np.column_stack((df_ext_drift[lat], df_ext_drift[lon]))
+    tree = cKDTree(grid_points)
+
+    # handle the cross validation context 
+    if isinstance(cv_mask,np.ndarray) :
+        # We want to remove the validation points for df_to_krige and define the prediction grid as the validation locations.
+        df_validation = df_to_krige[cv_mask]
+        df_to_krige = df_to_krige[~cv_mask]
+        # pred grid
+        x_pred_grid = df_validation.x.values
+        y_pred_grid = df_validation.y.values
+        pred_latlon = df_validation[[lat,lon]]
+        # Query nearest grid point for each...
+        # ... observation that will be in the kriging df  :
+        _, idxs_in = tree.query(np.column_stack((df_to_krige[lat], df_to_krige[lon])))
+        drift_at_obs = df_ext_drift[qty].values[idxs_in]
+        # ... observation that will be in the validation set 
+        _, idxs_out = tree.query(np.column_stack((df_validation[lat], df_validation[lon])))
+        drift_at_obs_val = df_ext_drift[qty].values[idxs_out]
+        drift_pred_grid = [drift_at_obs_val]
+    else :
+        _, idxs = tree.query(np.column_stack((lats_obs, lons_obs)))
+        drift_at_obs = df_ext_drift[qty].values[idxs]
+        pred_latlon = df_ext_drift[[lat,lon]]
+        x_pred_grid = df_ext_drift.x.values
+        y_pred_grid = df_ext_drift.y.values
+        drift_pred_grid = [df_ext_drift[qty].values]
+
+    # KRIGING 
+    uk = UniversalKriging(
+        x=df_to_krige.x,
+        y=df_to_krige.y,
+        z=df_to_krige[qty],
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        drift_terms=["specified"],
+        specified_drift=[drift_at_obs]
+    )
+    z_pred, ss_pred = uk.execute(
+        style="points",
+        xpoints=x_pred_grid,
+        ypoints=y_pred_grid,
+        specified_drift_arrays=drift_pred_grid
+    )
+    # gather results in df
+    df_pred = pd.DataFrame({lon: pred_latlon[lon],
+                lat:pred_latlon[lat],
+                'z_pred':z_pred,
+                'ss_pred':ss_pred})
+    # if cv mask was provided, also include the obs values at the pred locations
+    if isinstance(cv_mask,np.ndarray):
+        df_pred['z_obs']=df_validation[qty].values
+    return df_pred
+
+def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
+    """ This function computes and saves cross-validation results/plots
+    from the given cv_df dataframe containing predictions z_pred and observations z_obs.
+    THe cv_df also needs to contains columns 'site_name','lon','lat'.
+    Inputs : 
+        - cv_df : pandas df
+        - fp : str, output path
+    """
+    metrics_dict = {}
+    cv_df['residual']=cv_df.z_obs - cv_df.z_pred
+    metrics_dict['RMSE'] = utils.RMSE(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['MAE'] = utils.MAE(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['mean_bias'] = np.mean(cv_df.residual)
+    metrics_dict['R_obs_pred'],_ = pearsonr(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['R_pred_res'],_ = pearsonr(cv_df.z_pred,cv_df.residual)
+    
+    # STATISTICAL TEST 
+    # (ref: Kleijnen & Van Beers 2021 https://www.researchgate.net/publication/354256613_Statistical_Tests_for_Cross-Validation_of_Kriging_Models)
+    alpha = 0.05 # max acceptable type I error rate 
+    cv_df['PES'] = utils.PES(cv_df.z_obs,cv_df.z_pred,cv_df.ss_pred)
+    # Bonferroni correction
+    critical_value = norm.ppf(1 - alpha/(2*len(cv_df)))
+    T = cv_df["PES"].abs().max()
+    metrics_dict[f'Kleijnen_null_hypothesis_{alpha}level'] = 'not rejected' if T > critical_value else 'rejected' # if not rejected, i can say that the kriging model is statistically compatible with the observed data in terms of predictive performance.
+    # scatter plot with confidence intervals 
+    cv_df['ci']= critical_value * np.sqrt(cv_df.ss_pred)
+    putils.plot_scatter_with_ci(cv_df,alpha,fp=f'{fp}PES_scatterplot.png')
+    # save the cross val df
+    cv_df.to_csv(f'{fp}crossval_df.csv')
+    # map of error by site
+    putils.plot_isoscape_latlon_platecarree_df(cv_df,time='',
+                                               title=None,
+                                               countries_borders=True,
+                                               qty_col='residual',
+                                               save_fp=f'{fp}LOO_residuals_map.png',
+                                               s=25,
+                                               cmap='managua',
+                                               qty_label=r'$\delta^{18}\text{O}_p$ residuals',
+                                               figsize=(10,5),
+                                               adjust_extent=False
+                                               )
+    # # plot error in func of distance to closest pred point 
+
 # =========================================================================
 # External variables handling and interpolation
 # ========================================================================
@@ -1071,3 +1204,4 @@ def compute_distance_to_coast(df_latlon, coast_shp_path="/data/shapefiles/ne_10m
 
     df["D"] = distances # dist to coast in m
     return df
+

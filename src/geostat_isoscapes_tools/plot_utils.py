@@ -13,6 +13,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.axes import Axes
 import matplotlib.gridspec as gridspec
 from collections import OrderedDict
+from matplotlib.colors import Normalize
 
 def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
@@ -55,16 +56,31 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
 def plot_isoscape_latlon_platecarree_df(
         df,
         time: str = '',
-        title: str = "Values of d18O",
+        title: str |None = "Values of d18O",
         countries_borders: bool = False,
         lat_col :str = 'lat',
         lon_col :str = 'lon',
-        qty_col :str = 'd18Op'
+        qty_col :str = 'd18Op',
+        save_fp : str|None = None,
+        s = 20,
+        unit='‰',
+        cmap='viridis',
+        qty_label : str| None = None,
+        figsize=(10,5),
+        adjust_extent=True
     ):
     """
-    Plot the given dataframe with columns: lat, lon, d18O on PlateCarree projection.
+    Plot the given dataframe with columns: lat, lon, qty on PlateCarree projection.
     """
-    fig, ax = plt.subplots(figsize=(10, 5),
+    sns.set_theme(context='talk',
+                  style='ticks',
+                  palette='colorblind',
+                  rc={'axes.linewidth':1.2,"grid.alpha":0.3,"grid.linestyle":'--'})
+    if cmap=='icefireblack':
+        # colorblind 
+        cmap = sns.color_palette("icefire", as_cmap=True)
+
+    fig, ax = plt.subplots(figsize=figsize,
                            subplot_kw={"projection": ccrs.PlateCarree()})
 
     # Scatter plot of irregular points
@@ -72,33 +88,46 @@ def plot_isoscape_latlon_platecarree_df(
         df[lon_col],
         df[lat_col],
         c=df[qty_col],
-        cmap="viridis",
+        cmap=cmap,
         transform=ccrs.PlateCarree(),
-        s=20,
-        edgecolor="none"
+        s=s,
+        edgecolor="none",
+        alpha=0.9
     )
 
-    cbar = plt.colorbar(sc, ax=ax, label=qty_col)
+    # cbar = plt.colorbar(sc, ax=ax, label=qty_col)
+    if qty_label is None :
+        qty_label = qty_col
+    divider = make_axes_locatable(ax)
+    cax= divider.append_axes("right", size="4%", pad=0.05,axes_class=Axes)
+    cbar = fig.colorbar(sc, cax=cax)
+    cbar.set_label(qty_label+f' [{unit}]')
+
     if countries_borders:
-        country_borders = cfeature.NaturalEarthFeature(
-            category='cultural',
-            name='admin_0_boundary_lines_land',
-            scale='50m',
-            facecolor='none'
-        )
-        ax.add_feature(country_borders, edgecolor='gray') # type:ignore
-    ax.coastlines() # type:ignore
+        ax.add_feature(cfeature.BORDERS, linewidth=0.2)#type:ignore
+    # ax.coastlines() # type:ignore
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.2) #type:ignore
+    ax.add_feature(cfeature.LAND, facecolor="#ffffff", edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.OCEAN, facecolor="#e1e1e0", edgecolor="none")#type:ignore
+    
     valid = df.dropna(subset=[lat_col, lon_col, qty_col])
     eps = 5
-    ax.set_extent([         #type:ignore
-        valid[lon_col].min()-eps,
-        valid[lon_col].max()+eps,
-        valid[lat_col].min()-eps,
-        valid[lat_col].max()+eps
-    ], crs=ccrs.PlateCarree())
-    ax.set_title(f"{title} - {time}")
-
-    return fig, ax
+    if adjust_extent :
+        ax.set_extent([    #type:ignore
+            valid[lon_col].min()-eps,
+            valid[lon_col].max()+eps,
+            valid[lat_col].min()-eps,
+            valid[lat_col].max()+eps
+        ], crs=ccrs.PlateCarree())
+    else :
+        ax.set_extent([-180,180,-90,90]) #type:ignore
+    if title is not None :
+        ax.set_title(f"{title}{time}")
+    plt.tight_layout()
+    if save_fp is not None :
+        plt.savefig(save_fp,dpi=400)
+    else : 
+        return fig, ax
 
 
 def plot_projected_data(coords_proj,vals_s, projection_str='Mercator',robust=True):
@@ -323,7 +352,7 @@ def plot_global_map(data:pd.DataFrame,
                     title:str,
                     quantity_col:str='d18O_measurement',
                     quantity:str='d18O',
-                    unit:str='‰ VPDB',
+                    unit:str='‰',
                     proj:bool=True,
                     symbol : str ='square',
                     size : int =10,
@@ -402,45 +431,98 @@ def plot_global_map(data:pd.DataFrame,
         fig.write_html(save_fig, include_plotlyjs="cdn")
     return fig
 
-def plot_ked_platecarree_points(lon_pred, lat_pred, z_pred, ss_pred,
-                                df_exp, value_col='d18Op_VSMOW',
-                                title="Kriging with External Drift (PlateCarree)",
+def plot_platecarree_field_and_scatter_on_top(field_df,
+                                              points_df,
+                                              lat='lat',
+                                              lon='lon',
+                                              qty_field='d18Op',
+                                              qty_points='d18Op',
+                                              colorbarlabel=r'$\delta^{18}\text{O}_p$',
+                                              title=r"External drift $\delta^{18}\text{O}_p$ (square markers) and its values at obs points (circles)",
+                                              vmin = -30,
+                                              vmax = 0,
+                                              figsize=(10,6),
+                                              markersize=30,
+                                              ):
+    """ TODO: This function plots a field overlays a scatter plot on top of it. Designed for checking the values of a qty (qty_points) at some locs of the field.
+    """
+    # Normalization range
+    norm = Normalize(vmin=vmin, vmax=vmax)
+
+    # Plot
+    fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': ccrs.PlateCarree()})
+
+    # Plot the field values as colored squares
+    scatter_field = ax.scatter(
+        field_df[lon],
+        field_df[lat],
+        c=field_df[qty_field],
+        cmap='plasma',
+        norm=norm,
+        s=markersize,
+        marker='s',         # Square markers
+        edgecolor='none',
+        transform=ccrs.PlateCarree()
+    )
+
+    # Add colorbar
+    plt.colorbar(scatter_field, ax=ax, label=colorbarlabel)
+
+    # Overlay the observation points
+    ax.scatter(
+        points_df[lon],
+        points_df[lat],
+        c=points_df[qty_points],
+        cmap='plasma',
+        norm=norm,
+        s=markersize+20,
+        edgecolor='k',
+        transform=ccrs.PlateCarree()
+    )
+
+    ax.coastlines() # type:ignore
+    ax.set_title(title)
+    return fig,ax
+
+    
+def plot_ked_platecarree_points(df_pred,
+                                df_obs, value_col='d18Op_VSMOW',
+                                title=None,
                                 cmap="plasma",
-                                figsize=(14,6),
+                                figsize=(20,6),
                                 vmin=None, vmax=None,
-                                s_pred=20,  # size of predicted squares
-                                s_obs=40    # size of observation points
+                                lon='lon',
+                                lat='lat',
+                                s_pred=20,  # size of pred squares
+                                s_obs=40 ,   # size of obs points,
+                                adjust_extent:bool=True
                             ):
     """
     Plot KED kriging results in lon/lat (PlateCarree projection) using discrete scatter plots.
     Inputs :
-        lon_pred, lat_pred : 1D arrays of longitudes and latitudes for predicted points
+        df_pred : DataFrame with predicted points (must have lon/lat columns)
+        df_obs : DataFrame with observed points (must have lon/lat columns)
         z_pred : 1D array of predicted values
         ss_pred : 1D array of kriging variances
         df_exp : DataFrame with observed points (must have lon/lat columns)
         value_col : column name in df_exp for observed values
     """
-    
     # color limits
-    vmin = vmin if vmin is not None else np.nanmin(z_pred)
-    vmax = vmax if vmax is not None else np.nanmax(z_pred)
-    
+    vmin = vmin if vmin is not None else np.nanmin(df_pred['z_pred'])
+    vmax = vmax if vmax is not None else np.nanmax(df_pred['z_pred'])
+
     fig, axes = plt.subplots(1, 2, figsize=figsize,subplot_kw={'projection': ccrs.PlateCarree()})
     fig.subplots_adjust(
         left=0.05,
         right=0.95,
         bottom=0.08,
-        top=0.90,
-        wspace=0.12
+        top=0.99,
+        wspace=0.2
     )
-    # set extent with padding
-    lon_min, lon_max = np.min(lon_pred), np.max(lon_pred)
-    lat_min, lat_max = np.min(lat_pred), np.max(lat_pred)
-    pad_lon = (lon_max - lon_min) * 0.05
-    pad_lat = (lat_max - lat_min) * 0.05
 
     for ax in axes:
-        ax.set_extent([lon_min - pad_lon, lon_max + pad_lon,lat_min - pad_lat, lat_max + pad_lat], crs=ccrs.PlateCarree())
+        if adjust_extent :
+            ax.set_extent([df_pred[lon].min(), df_pred[lon].max(), df_pred[lat].min(), df_pred[lat].max()], crs=ccrs.PlateCarree())#[lon_min - pad_lon, lon_max + pad_lon,lat_min - pad_lat, lat_max + pad_lat], crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.COASTLINE, linewidth=0.6)
         ax.add_feature(cfeature.BORDERS, linewidth=0.4)
         ax.add_feature(cfeature.LAND, facecolor="#f0f0f0", edgecolor="none")
@@ -448,26 +530,35 @@ def plot_ked_platecarree_points(lon_pred, lat_pred, z_pred, ss_pred,
         gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray', alpha=0.5, linestyle='--')
         gl.right_labels = gl.top_labels = False
 
-    sc1 = axes[0].scatter(lon_pred, lat_pred,c=z_pred,cmap=cmap,vmin=vmin, vmax=vmax,s=s_pred,marker='s', edgecolor='none',transform=ccrs.PlateCarree())
-    axes[0].scatter(df_exp['lon'], df_exp['lat'],c=df_exp[value_col],cmap=cmap,vmin=vmin, vmax=vmax,s=s_obs,edgecolor='black',linewidth=0.4,transform=ccrs.PlateCarree())
+    sc1 = axes[0].scatter(df_pred[lon],
+                          df_pred[lat],
+                          c=df_pred['z_pred'],
+                          cmap=cmap,vmin=vmin, vmax=vmax,s=s_pred,marker='s', edgecolor='none',transform=ccrs.PlateCarree())
+    axes[0].scatter(df_obs[lon],
+                    df_obs[lat],
+                    c=df_obs[value_col],
+                    cmap=cmap,vmin=vmin, vmax=vmax,s=s_obs,edgecolor='black',linewidth=0.4,transform=ccrs.PlateCarree())
     # cbar1 = plt.colorbar(sc1, ax=axes[0], orientation='vertical', shrink=0.75, pad=0.05)
     divider = make_axes_locatable(axes[0])
     cax1 = divider.append_axes("right", size="4%", pad=0.05,axes_class=Axes)
     cbar1 = fig.colorbar(sc1, cax=cax1)
-    cbar1.set_label(f"{value_col} (‰ VSMOW)")
-    axes[0].set_title("Kriging Prediction (discrete)")
+    cbar1.set_label(r"$\delta^{18}\text{O}_p$ [‰]")
+    axes[0].set_title("Kriging Prediction")
 
-    sc2 = axes[1].scatter(lon_pred, lat_pred,c=ss_pred,cmap='plasma',s=s_pred, marker='s',edgecolor='none',transform=ccrs.PlateCarree())
+    sc2 = axes[1].scatter(df_pred[lon],
+                          df_pred[lat],
+                          c=df_pred['ss_pred'],
+                          cmap='plasma',s=s_pred, marker='s',edgecolor='none',transform=ccrs.PlateCarree())
     # cbar2 = plt.colorbar(sc2, ax=axes[1], orientation='vertical', shrink=0.75, pad=0.05)
     divider = make_axes_locatable(axes[1])
     cax2 = divider.append_axes("right", size="4%", pad=0.05, axes_class=Axes)
     cbar2 = fig.colorbar(sc2, cax=cax2)
     cbar2.set_label("Kriging Variance [‰²]")
-    axes[1].set_title("Kriging Variance (discrete)")
+    axes[1].set_title("Kriging Variance")
 
-    fig.suptitle(title, fontsize=15,y=0.94)
-    # plt.tight_layout()
-    return fig, axes
+    if title is not None: 
+        fig.suptitle(title, fontsize=15,y=0.94)
+    return fig,ax
 
 
 def plot_interdistances_graph(locs_1,locs_2,title='Graph of point pairs'):
@@ -506,3 +597,28 @@ def plot_interdistances_graph(locs_1,locs_2,title='Graph of point pairs'):
     ax.set_title(title, fontdict={'fontsize':12})
 
     return fig,ax
+
+
+def plot_scatter_with_ci(df,alpha,fp,figsize=(10,10)):
+    """ Plots a scatter plot of prediction points with a simulatenous confidence interval of (semi)length ci, and also the truth value.
+    df must contain columns z_pred,z_obs , ci. Argument alpha is the maximum acceptable type 1 error rate used in the statistical test. 
+    Saves the figure at path fp
+    """
+    sns.set_theme(context='talk',
+                  style='ticks',
+                  palette='colorblind',
+                  rc={'axes.linewidth':1.2,"grid.alpha":0.3,"grid.linestyle":'--'})
+    
+    fig,ax = plt.subplots(figsize=figsize)
+
+    ax.scatter(df.z_obs,df.z_pred,zorder=3,label='LOO predictions')
+    ax.errorbar(df.z_obs,df.z_pred,yerr=df.ci,fmt='none',capsize=3,elinewidth=0.5,zorder=2,label=f"{int((1-alpha)*100)}% simultaneous  CI.")
+    lims = [min(df.z_obs.min(),df.z_pred.min()),max(df.z_obs.max(),df.z_pred.max())]
+    ax.plot(lims,lims,linestyle='--',linewidth=1, label="x=y")
+    ax.set_xlabel('Observed values')
+    ax.set_ylabel('LOO kriging prediction')
+    ax.legend()
+    # ax.set_aspect('equal',adjustable='box')
+    ax.grid(True,alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(fp,dpi=400)

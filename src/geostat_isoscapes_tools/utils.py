@@ -33,6 +33,22 @@ def load_xarray_datarray(fn: str) -> xr.Dataset:
     with xr.open_dataset(filename_or_obj=fn, engine='netcdf4',decode_times=False) as file:
         return file
 
+def prepare_ds_of_ked_isoscsape(ked_df : pd.DataFrame)->xr.Dataset :
+    ds = ked_df.set_index(['time', 'lat', 'lon']).to_xarray()
+    ds['d18Op'].attrs.update({
+        'units': 'per mil',
+        'description': 'd18Op VSMOW obtained by KED interpolation from SISAL speleothem dataset and iTrace simulations (assumed as external drift).',
+    })
+    ds['ss_pred'].attrs.update({
+        'units': 'per mil squared',
+        'description': 'Kriging variance of the d18Op VSMOW after KED interpolation.',
+    })
+    ds.coords['lon'].attrs.update({'units': 'degrees', 'description': 'Longitude, from -180 degrees (W180) to +180 degrees (E180).'})
+    ds.coords['lat'].attrs.update({'units': 'degrees', 'description': 'Latitude, from -90 degrees (S90) to +90 degrees (N90).'})
+    ds.coords['time'].attrs.update({'units': 'years', 'description': 'Years before Present (1950). Positive integers.'})
+    return ds 
+
+
 def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     ''' This function bins a pandas Series according to the given bin width.
     It returns the binned Series.
@@ -320,3 +336,11 @@ def RMSE(y_true,y_pred):
 def MAE(y_true,y_pred):
     """ compute mean absolute error of the predicted values """
     return np.nanmean(np.abs(y_true-y_pred))
+
+def PES(z_obs,z_pred,ss_pred):
+    """ Studentized prediction error (PES) of kriging predictions.
+    - z_obs is the measured value
+    - z_pred is the kriging prediction 
+    - s_pred is the kriging predictive variance.
+    """
+    return (z_obs - z_pred)/np.sqrt(ss_pred)
