@@ -18,8 +18,8 @@ itrace = True
 
 # PARAMETERS LISTS :
 
-mask_itrace_around_sisal_pts = True
-mask_radius = 400
+mask_itrace_around_sisal_pts = False
+mask_radius = 1000
 
 trends = [
     # 'multiple_linear_ele_D',
@@ -44,20 +44,20 @@ azimuths = [None] # 0 45 90 180 # for directional variograms
 
 sims = { # simulation spec for itrace dataset
     # '1':{}, # dummy entry for sisal only, to keep all times
-    '12':{'num':'05','suffix':'800001-899912'},
-    '16':{'num':'01','suffix':'400001-499912'},
+    # '12':{'num':'05','suffix':'800001-899912'},
+    # '16':{'num':'01','suffix':'400001-499912'},
     '20':{'num':'01','suffix':'100001-199912'}
     }
 
-res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
+res_months_list = [12*1] # min resolution is 12 months if using sisal, 1 month if using itrace
 
 verbose = False
 
 # geographical regions on which to mask itrace/sisal data for the variogram computations
 # default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
 regions_list = [
-    None
-    # ('continents',['South America','North America','Europe','Asia','Oceania','Africa'])
+    # None
+    ('continents',['South America','North America','Europe','Asia','Oceania','Africa'])
     # ('countries',['United States of America','Mexico'])
     # ('continents',['South America']),
     # ('continents',['North America']),
@@ -82,8 +82,8 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 # Variogram model to try to fit
 model_name = 'spherical'
 maxlag = 8.5e6
-nlags = 10
-bin_func = 'uniform'
+nlags = 15
+bin_func = 'even'
 
 # Naming convention of columns
 data_cols = {'lat':'lat',
@@ -178,7 +178,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
     if (sisal | mask_itrace_around_sisal_pts) & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res_months)) | sisal_change) :
         print('----- New sisal upper-level params region or res was set, or new temporal slice param detected : taking the new slice from sisal df')
         if kyr!='all':
-            sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
+            sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>=(int(kyr)-1)*1000)&(sisal_df['binned_age']<int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
         else :
             sisal_df_valid = sisal_df.rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() # type:ignore
 
