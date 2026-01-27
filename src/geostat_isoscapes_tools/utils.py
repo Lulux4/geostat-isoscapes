@@ -344,3 +344,7 @@ def PES(z_obs,z_pred,ss_pred):
     - s_pred is the kriging predictive variance.
     """
     return (z_obs - z_pred)/np.sqrt(ss_pred)
+
+def logbias(y_true,y_pred):
+    """ Log bias metric (dB) """
+    return 10.0*np.log10(np.sum(y_true)/np.sum(y_pred))
