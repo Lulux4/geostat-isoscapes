@@ -42,12 +42,28 @@ trends = [
 
 azimuths = [None] # 0 45 90 180 # for directional variograms
 
-sims = { # simulation spec for itrace dataset
-    # '1':{}, # dummy entry for sisal only, to keep all times
-    # '12':{'num':'05','suffix':'800001-899912'},
-    # '16':{'num':'01','suffix':'400001-499912'},
-    '20':{'num':'01','suffix':'100001-199912'}
-    }
+# how to access itrace data ? Need the datafolder (not provided in my repo, seee intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
+itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
+with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
+    itrace_sims = json.load(f)
+
+# keep only the simulations of interest (the key represent 1000 yr BP slices)
+sims = dict((k,itrace_sims[k]) for k in (
+    '12',
+    '13',
+    '14',
+    '15',
+    '16',
+    '17',
+    '18',
+    '19',
+    '20'
+    ) if k in itrace_sims)
+
+# or if not computing on itrace, just define a dummy key for accessing a sisal slice
+# sims = {'1':{},  # slice 0-1000 yr BP
+#         'all':{} # all time points
+#         }
 
 res_months_list = [12*1] # min resolution is 12 months if using sisal, 1 month if using itrace
 
@@ -56,8 +72,8 @@ verbose = False
 # geographical regions on which to mask itrace/sisal data for the variogram computations
 # default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
 regions_list = [
-    # None
-    ('continents',['South America','North America','Europe','Asia','Oceania','Africa'])
+    None
+    # ('continents',['South America','North America','Europe','Asia','Oceania','Africa'])
     # ('countries',['United States of America','Mexico'])
     # ('continents',['South America']),
     # ('continents',['North America']),
@@ -124,10 +140,11 @@ for res_months,kyr,regions,trend,azimuth in iters :
     
     if itrace : 
         itrace_params = params.copy()
-        itrace_params['Itrace simulation spec'] = { 'kyr': kyr,                   
+        itrace_params['Itrace simulation spec'] = { 'kyr_filename': sims[kyr]['yrBPname'],
+                                                'kyr': kyr,                   
                                                 'num': sims[kyr]['num'],                
                                                 'model':'clm2.h0',
-                                                'forcings':'ice_ghg_orb_wtr',   
+                                                'forcings':sims[kyr]['forcings'],   
                                                 'suffix': sims[kyr]['suffix'], 
                                                 'prefix':'b.e13.Bi1850C5.f19_g16'}
     
@@ -158,7 +175,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
     sisal_change = False
     # 1. If the resolution changed, we must reload sisal global data
     if (sisal & (tmp_res!=res_months)) | (mask_itrace_around_sisal_pts & init):
-        print('----- New sisal resolution : loading sisal global df')
+        # print('----- New sisal resolution : loading sisal global df')
         sisal_df_global = gutils.get_sisal_data_for_kriging(res=int(res_months/12),
                                                                     regions=None,
                                                                     buffer_km=buffer_km,
@@ -168,7 +185,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
         init=False # even if res changes again, we will not need to reload sisal for adapting the mask
     # 2. If region changed, truncate the global df 
     if (sisal | mask_itrace_around_sisal_pts) & ((regions!=tmp_regions) | sisal_change) & (regions is not None) : 
-        print('----- New sisal upper-level param res was set, or new regions params is detected : applying a new mask to sisal global df')
+        # print('----- New sisal upper-level param res was set, or new regions params is detected : applying a new mask to sisal global df')
         sisal_df_regions = utils.mask_regions_shape(sisal_df_global,buffer_km=buffer_km,regions=regions) # type:ignore
         sisal_df = sisal_df_regions
         sisal_change = True
@@ -176,7 +193,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
     # 3. If the temporal slice (kyr) is not the same as previous iteration, 
     #    we just need to take the right slice of sisal data (no reload)
     if (sisal | mask_itrace_around_sisal_pts) & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res_months)) | sisal_change) :
-        print('----- New sisal upper-level params region or res was set, or new temporal slice param detected : taking the new slice from sisal df')
+        # print('----- New sisal upper-level params region or res was set, or new temporal slice param detected : taking the new slice from sisal df')
         if kyr!='all':
             sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>=(int(kyr)-1)*1000)&(sisal_df['binned_age']<int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
         else :
@@ -185,8 +202,9 @@ for res_months,kyr,regions,trend,azimuth in iters :
     # 4. For itrace, we need to reload in any case since we cannot load several slices at the smae time
     itrace_change = False
     if itrace & ((tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months)): 
-        print('----- New itrace params res or kyr : loading appropriate data')
+        # print('----- New itrace params res or kyr : loading appropriate data')
         itrace_data_global = gutils.get_preprocessed_itrace_data(
+            data_folder=itrace_folder,
             res=itrace_params['res [months]'],
             P=True,
             format='xr',
@@ -196,7 +214,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
             sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
             sim_suffix =itrace_params['Itrace simulation spec']['suffix'], 
             sim_forcings=itrace_params['Itrace simulation spec']['forcings'],
-            sim_kyr= int(itrace_params['Itrace simulation spec']['kyr']),
+            sim_kyr= int(itrace_params['Itrace simulation spec']['kyr_filename']),
             sim_num=itrace_params['Itrace simulation spec']['num'],
             sim_model=itrace_params['Itrace simulation spec']['model'],
         ) # xr
@@ -205,7 +223,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
 
     # 4. Apply new geographical mask if the regions have changed from previous iteration, or if it is the first iter.
     if (itrace_change | ((regions!=tmp_regions)& itrace)) & (regions is not None): 
-        print('----- New itrace params res or kyr was set, or new regions detected, so we re-mask the global data for the specified regions')
+        # print('----- New itrace params res or kyr was set, or new regions detected, so we re-mask the global data for the specified regions')
         itrace_data = utils.mask_regions_shape(itrace_data_global,buffer_km=buffer_km,regions=regions) # type:ignore
 
     # 5. update our temporary values of kyr and res

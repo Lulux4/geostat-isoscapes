@@ -872,7 +872,7 @@ def get_sisal_data_for_kriging(res : int | None = 200,
     return data_df
 
 def get_preprocessed_itrace_data(res=None,
-                            data_folder = '/data/modern/iTrace/',
+                            data_folder = "/media/luluxette/T7_Shield/pdm/iTrace/",
                             sim_prefix = 'b.e13.Bi1850C5.f19_g16',
                             sim_kyr = 12,
                             sim_forcings = 'ice_ghg_orb_wtr',
@@ -892,8 +892,7 @@ def get_preprocessed_itrace_data(res=None,
     """
     print('loading itrace files')
     # files to find and read :
-    rootdir = utils.get_project_root()
-    fn_merged = rootdir+f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
+    fn_merged = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
     fn_itrace_RAIN_H218O = f'{fn_merged}.RAIN_H218O.{sim_suffix}.nc'
     fn_itrace_RAIN_H2OTR = f'{fn_merged}.RAIN_H2OTR.{sim_suffix}.nc'
     fn_itrace_RAIN = f'{fn_merged}.RAIN.{sim_suffix}.nc'
@@ -1067,26 +1066,33 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
         - fp : str, output path
     """
     metrics_dict = {}
+
+    # BASIC METRICS 
     cv_df['residual']=cv_df.z_obs - cv_df.z_pred
     metrics_dict['RMSE'] = utils.RMSE(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['MAE'] = utils.MAE(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['mean_bias'] = np.mean(cv_df.residual)
+    metrics_dict['logbias'] = utils.logbias(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['R_obs_pred'],_ = pearsonr(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['R_pred_res'],_ = pearsonr(cv_df.z_pred,cv_df.residual)
     
     # STATISTICAL TEST 
-    # (ref: Kleijnen & Van Beers 2021 https://www.researchgate.net/publication/354256613_Statistical_Tests_for_Cross-Validation_of_Kriging_Models)
+    # from Kleijnen & Van Beers 2021 
+    # https://www.researchgate.net/publication/354256613_Statistical_Tests_for_Cross-Validation_of_Kriging_Models)
     alpha = 0.05 # max acceptable type I error rate 
     cv_df['PES'] = utils.PES(cv_df.z_obs,cv_df.z_pred,cv_df.ss_pred)
-    # Bonferroni correction
-    critical_value = norm.ppf(1 - alpha/(2*len(cv_df)))
+    critical_value = norm.ppf(1 - alpha/(2*len(cv_df))) # Bonferroni correction
     T = cv_df["PES"].abs().max()
     metrics_dict[f'Kleijnen_null_hypothesis_{alpha}level'] = 'not rejected' if T > critical_value else 'rejected' # if not rejected, i can say that the kriging model is statistically compatible with the observed data in terms of predictive performance.
-    # scatter plot with confidence intervals 
+    # visualization of the test : if there is an error bars that does not cross the 1:1 line, we cannot reject h0. 
     cv_df['ci']= critical_value * np.sqrt(cv_df.ss_pred)
     putils.plot_scatter_with_ci(cv_df,alpha,fp=f'{fp}PES_scatterplot.png')
-    # save the cross val df
+    
+    # save cross val df and metrics
     cv_df.to_csv(f'{fp}crossval_df.csv')
+    with open(f'{fp}crossval_metrics.json','w') as file :
+        json.dump(metrics_dict,file)
+    
     # map of error by site
     putils.plot_isoscape_latlon_platecarree_df(cv_df,time='',
                                                title=None,
@@ -1099,7 +1105,7 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
                                                figsize=(10,5),
                                                adjust_extent=False
                                                )
-    # # plot error in func of distance to closest pred point 
+    # Other ideas : plot error in func of distance to closest pred point (not sure it would add any valuable understanding)
 
 # =========================================================================
 # External variables handling and interpolation

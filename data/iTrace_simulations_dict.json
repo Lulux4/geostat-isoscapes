@@ -1,0 +1,10 @@
+{"12": {"yrBPname": "12","forcings": "ice_ghg_orb_wtr", "num": "05", "suffix": "800001-899912"},
+ "13": {"yrBPname": "13", "forcings": "ice_ghg_orb_wtr", "num": "02", "suffix": "700001-799912"},
+ "14": {"yrBPname": "14", "forcings": "ice_ghg_orb_wtr", "num": "01", "suffix": "600001-699912"}, 
+ "15": {"yrBPname": "15", "forcings": "ice_ghg_orb_wtr", "num": "03", "suffix": "500001-599912"}, 
+ "16": {"yrBPname": "16", "forcings": "ice_ghg_orb_wtr", "num": "01", "suffix": "400001-499912"}, 
+ "17": {"yrBPname": "17", "forcings": "ice_ghg_orb_wtr", "num": "01", "suffix": "300001-399912"}, 
+ "18": {"yrBPname": "18", "forcings": "ice_ghg_orb_wtr", "num": "03", "suffix": "200001-299912"}, 
+ "19": {"yrBPname": "20", "forcings": "ice_ghg_orb_wtr", "num": "01", "suffix": "100001-199912"}, 
+ "20": {"yrBPname": "20", "forcings": "ice_ghg_orb", "num": "01", "suffix": "000101-099912"},
+ "_comment":"These are the simulation parameters for itrace dataset, used to retrieve the name of itrace nc files. The keys 'xx' represent the time slice of the simulation, spanning from (xx-1) to xx kyr BP with monthly resolution. 'yrBPname' is the time label of the file name, it differs from the key only for time slice 19."}

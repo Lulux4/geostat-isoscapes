@@ -16,12 +16,21 @@ vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/re
 
 ss_threshold = 16
 
-sims = { # simulation spec for itrace dataset
-    # '1':{}, # dummy entry for sisal only, to keep all times
-    '12':{'num':'05','suffix':'800001-899912'},
-    '16':{'num':'01','suffix':'400001-499912'},
-    '20':{'num':'01','suffix':'100001-199912'}
-    }
+with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
+    itrace_sims = json.load(f)
+
+# keep only the simulations of interest (the key represent 1000 yr BP slices)
+sims = dict((k,itrace_sims[k]) for k in ('12',
+                                         '13',
+                                         '14',
+                                         '15',
+                                         '16',
+                                         '17',
+                                         '18',
+                                         '19',
+                                         '20'
+                                         ) if k in itrace_sims)
+
 res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
 verbose = False
 # Prepare the iterations 
@@ -44,10 +53,11 @@ for res_months,kyr in iters :
         }
     
     itrace_params = params.copy()
-    itrace_params['Itrace simulation spec'] = { 'kyr': kyr,                   
+    itrace_params['Itrace simulation spec'] = { 'kyr': kyr,
+                                            'kyr_filename':sims[kyr]['yrBPname'],                 
                                             'num': sims[kyr]['num'],                
                                             'model':'clm2.h0',
-                                            'forcings':'ice_ghg_orb_wtr',   
+                                            'forcings':sims[kyr]['forcings'],   
                                             'suffix': sims[kyr]['suffix'], 
                                             'prefix':'b.e13.Bi1850C5.f19_g16'}
     fp_output = f"{utils.get_project_root()}/output/kriging/res{itrace_params['res [months]']}/"
@@ -81,12 +91,13 @@ for res_months,kyr in iters :
         print('----- New itrace params res or kyr : loading appropriate data')
         itrace_data_global = gutils.get_preprocessed_itrace_data(
             res=itrace_params['res [months]'],
+            data_folder="/media/luluxette/T7_Shield/pdm/iTrace/",
             format='df',
             verbose=verbose,
             sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
             sim_suffix =itrace_params['Itrace simulation spec']['suffix'], 
             sim_forcings=itrace_params['Itrace simulation spec']['forcings'],
-            sim_kyr= int(itrace_params['Itrace simulation spec']['kyr']),
+            sim_kyr= int(itrace_params['Itrace simulation spec']['kyr_filename']),
             sim_num=itrace_params['Itrace simulation spec']['num'],
             sim_model=itrace_params['Itrace simulation spec']['model'],
         ) # df
@@ -116,7 +127,7 @@ for res_months,kyr in iters :
     df_list=[]
     for t_months, itrace_timestep in tqdm(itrace_data.groupby("time",observed=True)): 
         yrBP_time = utils.get_yrBP_from_itrace_time(t_months,start_year=int(kyr)*1000) #type:ignore
-        print(f'> t={int(yrBP_time)}yrBP')        
+        # print(f'> t={int(yrBP_time)}yrBP')        
         # create subfolder for storing metrics and plots outputs cleanly
         fp_output_yrBP = f"{fp_output}plots_and_metrics/{str(int(yrBP_time))}yrBP/"
         if not os.path.exists(fp_output_yrBP):
