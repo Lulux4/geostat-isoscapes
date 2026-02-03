@@ -223,14 +223,14 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
         if model_params is not None :
             if not ('+' in model_name):
                 range_ = model_params['range']
-                nugget =np.exp(model_params['nugget_ln'])
-                sill = np.exp(model_params['sill_ln'])+nugget
+                nugget =model_params['nugget']
+                sill = model_params['sill']+nugget
                 ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label="Range")
                 ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Sill")
             else:
                 range_ = gutils.effective_range(bin_edges,model_fct,0.95)
-                nugget= np.exp(model_params['nugget_ln'])
-                sill = np.exp(model_params['sill1'])+np.exp(model_params['sill2'])+nugget
+                nugget= model_params['nugget']
+                sill = model_params['sill1']+model_params['sill2']+nugget
                 ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label='Effective range')
                 ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Total sill")
         if (ax_info is not None) & (range_ is not None) & (sill is not None) & (nugget is not None):

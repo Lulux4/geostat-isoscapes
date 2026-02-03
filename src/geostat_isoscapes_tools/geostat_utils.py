@@ -488,7 +488,7 @@ def get_gstatvario_params_dict(parameters):
     """
     if len(parameters) == 3:
         range_, sill, nugget = parameters
-        return {'range':range_,'sill_ln':np.log(sill),'nugget_ln':np.log(nugget)}
+        return {'range':range_,'sill':sill,'nugget':nugget}
     else:
         print('Parameters are ',parameters)
         raise NotImplementedError('TODO : implement parameters retrieval for this case')
@@ -789,7 +789,7 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
             'spherical', 'exponential', 'gaussian', or any combination of these model names joined by a '+'
         - initial_params : list or None
             Starting guess for parameters
-        - bounds : 2-tuple or None
+        - bounds : 2-tuple of array-like or None
             Lower and upper bounds for curve_fit
         - pair_counts : array or None.
             number of pairs in each bin, used for weighting the fit (not mandatory)
@@ -807,13 +807,13 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
     param_names = model.params
 
     if initial_params is None:
-        sill_ln_guess = np.nanmax(gammas)
+        sill_guess = np.nanmax(gammas)
         range_guess = np.nanmax(bins) / 3
-        nugget_ln_guess = np.log(gammas[0])
+        nugget_guess = gammas[0]
         if '+' in model_name:
-            initial_params = [nugget_ln_guess,range_guess, sill_ln_guess/2,range_guess*2, sill_ln_guess/2]
+            initial_params = [nugget_guess,range_guess, sill_guess/2,range_guess*2, sill_guess/2]
         else:
-            initial_params = [range_guess,sill_ln_guess, nugget_ln_guess]
+            initial_params = [range_guess,sill_guess, nugget_guess]
     if pair_counts is not None:
         pair_counts = np.asarray(pair_counts)
         # Weights proportional to sqrt(N) => sigma = 1 / sqrt(N) => curve_fit minimizes residual*sqrt(N)
