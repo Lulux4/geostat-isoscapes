@@ -5,6 +5,7 @@ import pandas as pd
 import os 
 import itertools
 import json
+import numpy as np
 
 sns.set_style('dark')
 
@@ -65,7 +66,7 @@ sims = dict((k,itrace_sims[k]) for k in (
 #         'all':{} # all time points
 #         }
 
-res_months_list = [12*1] # min resolution is 12 months if using sisal, 1 month if using itrace
+res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
 
 verbose = False
 
@@ -100,6 +101,35 @@ model_name = 'spherical'
 maxlag = 8.5e6
 nlags = 15
 bin_func = 'even'
+if not ('+' in model_name) :
+    model_bounds = (
+        np.array([
+            0.0,   # min range
+            0.0,   # min sill
+            1.0]), # min nugget  : here you can force the model to have non-zero nugget
+        np.array([
+            maxlag,# max range 
+            50,    # max sill
+            10     # max nugget
+        ])
+    )  # max nugget 
+else :
+    model_bounds = (
+        np.array([
+            1.0,   # min nugget
+            0.0,   # min range1
+            0.0,   # min sill1
+            0.0,   # min range2
+            0.0,   # min sill2
+        ]),
+        np.array([
+            10,    # max nugget
+            maxlag,# max range1
+            50,    # max sill1
+            maxlag,# max range2
+            50     # max sill2
+        ])
+    )
 
 # Naming convention of columns
 data_cols = {'lat':'lat',
@@ -130,6 +160,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
         'trend':trend,
         'tolerance' : 22.5,
         'model_name' : model_name,
+        'model_bounds': model_bounds,
         'mask radius [km]': mask_radius,
         'plot_mask':True,
         'res [months]': res_months,
@@ -263,6 +294,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
         dict_dfs[key]['params'],dict_dfs[key]['fct_fitted'],dict_dfs[key]['pcov'] = gutils.fit_variogram_model(bins=dict_dfs[key]['df']['lag'], # type:ignore
                                                                                     gammas=dict_dfs[key]['df']['gamma'],
                                                                                     model_name=model_name,
+                                                                                    bounds=params['model_bounds'],
                                                                                     pair_counts=dict_dfs[key]['df']['count']
                                                                                     ) 
         if key.startswith('i'):
