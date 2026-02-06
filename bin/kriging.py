@@ -12,9 +12,8 @@ sns.set_style('dark')
 ###############################################
 # Define parameters to apply successively
 ###############################################
-vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
-
-ss_threshold = 16
+vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
+# vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
 
 with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
     itrace_sims = json.load(f)
@@ -60,7 +59,7 @@ for res_months,kyr in iters :
                                             'forcings':sims[kyr]['forcings'],   
                                             'suffix': sims[kyr]['suffix'], 
                                             'prefix':'b.e13.Bi1850C5.f19_g16'}
-    fp_output = f"{utils.get_project_root()}/output/kriging/res{itrace_params['res [months]']}/"
+    fp_output = f"{utils.get_project_root()}/output/kriging/run_2026_02_06/res{itrace_params['res [months]']}/"
     if not os.path.exists(fp_output):
         os.makedirs(fp_output)
     
@@ -116,9 +115,9 @@ for res_months,kyr in iters :
         variogram_dict = json.load(f)
     variogram_model = variogram_dict['model_name'] 
     variogram_parameters = {
-        "sill": np.exp(variogram_dict['sill_ln']), 
+        "sill": variogram_dict['sill'], 
         "range": variogram_dict['range'],  
-        "nugget": np.exp(variogram_dict['nugget_ln'])+1
+        "nugget": variogram_dict['nugget']
     }
     # =======================================================================================================
     # At this step, we have the external drift df and sisal df at the same temporal resolution and time slice.
@@ -154,12 +153,15 @@ for res_months,kyr in iters :
         )        
         # mask predictions according to a kriging variance threshold
         df_pred['time']=yrBP_time
-        df_pred_masked = df_pred[df_pred['ss_pred']<ss_threshold]
+        df_pred['confidence_flag']=1
+        df_pred.loc[df_pred['ss_pred']>8,'confidence_flag']= 2
+        df_pred.loc[df_pred['ss_pred']>16,'confidence_flag']=3
+        
         # add the df into a big df
-        df_list.append(df_pred_masked)
+        df_list.append(df_pred)
         # plot
         fig,axes = putils.plot_ked_platecarree_points(
-            df_pred=df_pred_masked,
+            df_pred=df_pred,
             df_obs=data_to_krige,               
             value_col='d18Op',
             cmap='plasma',
@@ -169,6 +171,19 @@ for res_months,kyr in iters :
         )
         plt.tight_layout()
         plt.savefig(f'{fp_output_yrBP}map_all_predictions.png',dpi=500)   
+        plt.close('all')
+        # save also map of values with confidence level < 3 to see more details 
+        fig,axes = putils.plot_ked_platecarree_points(
+            df_pred=df_pred[df_pred.confidence_flag < 3],
+            df_obs=data_to_krige,               
+            value_col='d18Op',
+            cmap='plasma',
+            s_pred=80,
+            figsize=(20,4),
+            adjust_extent=False
+        )
+        plt.tight_layout()
+        plt.savefig(f'{fp_output_yrBP}map_masked_predictions.png',dpi=500)   
         plt.close('all')
 
         # CROSS-VALIDATION LOOP 
@@ -191,9 +206,10 @@ for res_months,kyr in iters :
         # compute metrics on this df : by row and global 
         gutils.cv_metrics_and_plots(cv_df,fp_output_yrBP)
 
-    # aggregate results and save them 
-    df = pd.concat(df_list).reset_index(drop=True)
-    df.rename(columns={'z_pred':'d18Op'},inplace=True)
-    # df.to_csv(f'{fp_output}df_{kyr}kyrBP.csv')
-    ds = utils.prepare_ds_of_ked_isoscsape(df)
-    ds.to_netcdf(f'{fp_output}ds_{kyr}kyrBP.nc')
+# aggregate results and save them 
+df = pd.concat(df_list).reset_index(drop=True)
+
+df.rename(columns={'z_pred':'d18Op'},inplace=True)
+# df.to_csv(f'{fp_output}df_{kyr}kyrBP.csv')
+ds = utils.prepare_ds_of_ked_isoscsape(df)
+ds.to_netcdf(f'{fp_output}speleothems_isoscapes_11_to_20kaBP.nc')
