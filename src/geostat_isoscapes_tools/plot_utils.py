@@ -65,6 +65,7 @@ def plot_isoscape_latlon_platecarree_df(
         s = 20,
         unit='‰',
         cmap='viridis',
+        cmap_sym0 = False,
         qty_label : str| None = None,
         figsize=(10,5),
         adjust_extent=True
@@ -79,6 +80,11 @@ def plot_isoscape_latlon_platecarree_df(
     if cmap=='icefireblack':
         # colorblind 
         cmap = sns.color_palette("icefire", as_cmap=True)
+    if cmap_sym0 :
+        v_min = min(df[qty_col].min(),-df[qty_col].max())
+        v_max = max(df[qty_col].max(),-df[qty_col].min())
+    else :
+        v_min,v_max = None,None
 
     fig, ax = plt.subplots(figsize=figsize,
                            subplot_kw={"projection": ccrs.PlateCarree()})
@@ -92,7 +98,9 @@ def plot_isoscape_latlon_platecarree_df(
         transform=ccrs.PlateCarree(),
         s=s,
         edgecolor="none",
-        alpha=0.9
+        alpha=0.9,
+        vmin=v_min,
+        vmax = v_max
     )
 
     # cbar = plt.colorbar(sc, ax=ax, label=qty_col)

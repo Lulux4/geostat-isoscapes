@@ -1101,6 +1101,7 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
                                                save_fp=f'{fp}LOO_residuals_map.png',
                                                s=25,
                                                cmap='managua',
+                                               cmap_sym0=True,
                                                qty_label=r'$\delta^{18}\text{O}_p$ residuals',
                                                figsize=(10,5),
                                                adjust_extent=False
