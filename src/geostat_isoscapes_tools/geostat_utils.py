@@ -777,10 +777,10 @@ def effective_range(bins, fitted_fct, frac=0.95):
     idx = np.where(gamma >= frac*sill_total)[0]
     return h[idx[0]] if len(idx) > 0 else np.nan
 
-def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=None, bounds=None, pair_counts=None,):
+def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=None, bounds = None, weighting = None, pair_counts=None,lag_weights_power=0.5):
     """
     Fit a theoretical variogram model to empirical data (distances=bins and semivariances=gammas).
-
+    Weighting : either None, or more weight to short lags, or more weight to lags with the most pairs.
     Inputs :
         - bins : array
             Lag distances
@@ -794,7 +794,7 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
             Lower and upper bounds for curve_fit
         - pair_counts : array or None.
             number of pairs in each bin, used for weighting the fit (not mandatory)
-
+        - weighting : method for weighting the fit.
     Outputs : 
         - params : dict
             Optimal parameters
@@ -803,6 +803,11 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
         - pcov : ndarray
             Covariance matrix of the fit
     """
+    if not (weighting in [None,'lags','pair_counts']):
+        raise ValueError('Parameter weighting must be None, lags or pair_counts.')
+    if (weighting == 'pair_counts')&(pair_counts is None):
+        raise ValueError('if weighting is set to pair_counts, then the array of pair_counts must be provided in the arguments!')
+   
     model = variogram_models.define_model(model_name)
     func = model.get_model_func()
     param_names = model.params
@@ -815,12 +820,16 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
             initial_params = [nugget_guess,range_guess, sill_guess/2,range_guess*2, sill_guess/2]
         else:
             initial_params = [range_guess,sill_guess, nugget_guess]
-    if pair_counts is not None:
-        pair_counts = np.asarray(pair_counts)
-        # Weights proportional to sqrt(N) => sigma = 1 / sqrt(N) => curve_fit minimizes residual*sqrt(N)
-        sigma = 1.0 / np.sqrt(np.maximum(pair_counts, 1))
-    else:
-        sigma = None 
+
+    # define weights for the fitting. Curve fit mimimizes (residuals/sigma)^2, so we need the less reliable bins to have a large sigma
+    if weighting is not None :
+        if weighting == 'lags':
+            vals_to_weight = bins / np.nanmin(bins) # shortest lag = 1 ... largest lag = x (>1) times the shortest
+        elif (pair_counts is not None) & (weighting == 'pair_counts'):
+            vals_to_weight = np.nanmax(pair_counts) / pair_counts #type:ignore # lag with the most pairs = 1 ... lag with least pairs =  x (>1) times less than the lag with most pairs
+        sigma = vals_to_weight**lag_weights_power # increases the power of the weighting.
+    else :
+        sigma = None
     try : 
         popt, pcov = curve_fit(func, bins, gammas, p0=initial_params, bounds=bounds or (-np.inf, np.inf), sigma=sigma, absolute_sigma=False)
         fitted_fct = make_fitted_model_func(func,*popt)
