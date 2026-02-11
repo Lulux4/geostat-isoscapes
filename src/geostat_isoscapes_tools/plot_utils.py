@@ -115,8 +115,8 @@ def plot_isoscape_latlon_platecarree_df(
         ax.add_feature(cfeature.BORDERS, linewidth=0.2)#type:ignore
     # ax.coastlines() # type:ignore
     ax.add_feature(cfeature.COASTLINE, linewidth=0.2) #type:ignore
-    ax.add_feature(cfeature.LAND, facecolor="#ffffff", edgecolor="none")#type:ignore
-    ax.add_feature(cfeature.OCEAN, facecolor="#e1e1e0", edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.LAND, facecolor="#969595", edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.OCEAN, facecolor="#e0f5fc", edgecolor="none")#type:ignore
     
     valid = df.dropna(subset=[lat_col, lon_col, qty_col])
     eps = 5
