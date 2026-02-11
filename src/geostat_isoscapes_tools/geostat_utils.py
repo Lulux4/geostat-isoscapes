@@ -24,6 +24,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 import json 
 from scipy.spatial import cKDTree # type: ignore
 from pykrige.uk import UniversalKriging
+import properscoring as ps
 
 # ==========================================================
 # Coordinates projections 
@@ -841,28 +842,71 @@ def make_fitted_model_func(f,*args,**kwargs):
 # KRIGING
 # =============================================
 def get_sisal_data_for_kriging(res : int | None = 200, 
-                               temp_ds_fn : str = '/data/temperature/temp_800ka_ann.nc',
+                               temp_ds_name : str = 'krapp',
+                               temp_ds_path : str = '/data/temperature/temp_800ka_ann.nc',
                                regions : tuple[str,list[str]] | None = None,
                                buffer_km : float = 500,
                                conversion : str | None = 'd18Op_VSMOW_exactconv',
                                verbose : bool = True):
-    """ Load SISAL data, sanatize it, convert it to drip water equivalents, sclice at the desired temporal resolution (in years!) .
+    """ Load SISAL data, sanatize it, convert it to drip water equivalents, sclice at the desired temporal resolution (in years) .
+    Inputs :
+        - res : int or none : temporal resolution to achieve, in years
+        - temp_ds_name : str of the temperature dataset name. Supported : itrace, krapp. 
+        - temp_ds_path : str of the path to the temperature dataset. Can be the path to a file (krapp) or to a folder (itrace).
+        - regions : tuple of the type of regions and the corresponding list of named regions. Supported types : 'continents','countries','regions','subregions'.
+        - buffer_km : float of the width in km to include beyond the border of the regions listed instead of cutting off the data directly at the border.
+        - conversion : str or none. Name of the calcite to drip water conversion to apply. Supported : d18Op_VSMOW_exactconv, d18Op_VSMOW_linearized.
+        - verbose : bool, defining the level of verbosity of the programm.
+    Ouputs :
+        - data_df : pd.DataFrame of SISAL data preprocessed as specified in the input parameters. 
     """
-    print('loading sisal data')
+    if verbose : print('loading sisal data')
     data_df = sisal_utils.get_basic_cleaned_merged_sisal_data(verbose=verbose)
 
     # convert data if needed
     if conversion is not None :
+        print('converting speleothem data to drip-water equivalents...')
         # load temperature dataset
-        temp_xda = utils.load_xarray_datarray(utils.get_project_root()+temp_ds_fn).temp
-        data_df = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',verbose=verbose)
-        # remove samples for which the conversion failed (usually due to T retrieval failure)
-        data_df = data_df.dropna(subset=conversion)
+        if temp_ds_name == 'krapp':
+            temp_xda = utils.load_xarray_datarray(utils.get_project_root()+temp_ds_path).temp
+            temp_xda = temp_xda.assign_coords(time=('time',- temp_xda.time.values))
+            temp_xda = temp_xda.assign_coords(time = temp_xda.time.assign_attrs(units=f"years before present (1950)"))
+            data_df = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',verbose=verbose)
+            # remove samples for which the conversion failed (usually due to T retrieval failure)
+            data_df = data_df.dropna(subset=conversion)
+        elif temp_ds_name == 'itrace' : 
+            with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f: # hardcoded but this is a file of the repo
+                itrace_sims = json.load(f)
+            # open successively each itrace temperature output and convert the sisal data corresponding to this time slice 
+            data_df['d18Op_VSMOW_exactconv']=np.nan
+            data_df['d18Op_VSMOW_linearized']=np.nan
+            data_df['d18Oc_VSMOW']=np.nan
 
+            for t,t_dict in itrace_sims.items():
+                if t != '_comment':
+                    t = int(t)
+                    temp_xda = utils.get_itrace_temperature_dataset(data_folder=temp_ds_path,
+                                                                    sim_forcings=t_dict['forcings'],
+                                                                    sim_kyr=t_dict['yrBPname'],
+                                                                    sim_model='cam.h0',
+                                                                    sim_num=t_dict['num'],
+                                                                    sim_prefix='b.e13.Bi1850C5.f19_g16',
+                                                                    sim_suffix=t_dict['suffix'],
+                                                                    true_kyr=t,
+                                                                    format='xr',
+                                                                    verbose=verbose)
+                    mask = data_df.age.between((t-1)*1000,t*1000,inclusive='left')
+                    data_df[mask] = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df=data_df[mask].copy(),temp_xda=temp_xda,method='linear',verbose=verbose) #type:ignore
+        else :
+            raise NotImplementedError('supported temperature datasets are itrace and Krapp.')
+        
     # Bin years to the desired temporal resolution
     if res is not None :
         data_df['binned_age'] = utils.slice_in_equal_bins(data_df['age'].copy(),res)
     
+    # remove samples for which the conversion failed (usually due to T retrieval failure)
+    data_df = data_df.dropna(subset=conversion)
+
     data_df = data_df.rename(columns={'latitude':'lat','longitude':'lon'})
     if regions is not None :
         if verbose : print(' > keeping only the regions specified in argument')
@@ -890,7 +934,7 @@ def get_preprocessed_itrace_data(res=None,
     format : df or xr
     P = precip quantity
     """
-    print('loading itrace files')
+    if verbose : print('loading itrace files')
     # files to find and read :
     fn_merged = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
     fn_itrace_RAIN_H218O = f'{fn_merged}.RAIN_H218O.{sim_suffix}.nc'
@@ -1057,6 +1101,34 @@ def ked(df_to_krige : pd.DataFrame,
         df_pred['z_obs']=df_validation[qty].values
     return df_pred
 
+def compute_ked_metrics_dict(cv_df):
+    ''' TODO '''
+    metrics_dict = {}
+    # COMPUTE DISTANCE TO NN
+    cv_df['dist_nn'] = utils.dist_to_nn_on_sphere(points=cv_df[['lon','lat']])
+    # BASIC METRICS
+    cv_df['residual']=cv_df.z_obs - cv_df.z_pred
+    metrics_dict['RMSE'] = utils.RMSE(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['MAE'] = utils.MAE(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['mean_bias'] = np.mean(cv_df.residual)
+    metrics_dict['logbias'] = utils.logbias(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['R_obs_pred'],_ = pearsonr(cv_df.z_obs,cv_df.z_pred)
+    metrics_dict['R_pred_res'],_ = pearsonr(cv_df.z_pred,cv_df.residual)
+    metrics_dict['mean CRPS'] = np.mean(ps.crps_gaussian(cv_df.z_obs.values,cv_df.z_pred.values,np.sqrt(cv_df.ss_pred.values))) 
+    # STATISTICAL TEST 
+    # from Kleijnen & Van Beers 2021 
+    # https://www.researchgate.net/publication/354256613_Statistical_Tests_for_Cross-Validation_of_Kriging_Models)
+    # H0 = "the observed spatial field at time t is a realization of the KED model"
+    alpha = 0.05 # max acceptable type I error rate 
+    cv_df['PES'] = utils.PES(cv_df.z_obs,cv_df.z_pred,cv_df.ss_pred) 
+    critical_value = norm.ppf(1 - alpha/(2*len(cv_df))) # Bonferroni correction
+    cv_df['|PES| > critical_val'] = abs(cv_df.PES) > critical_value
+    T = cv_df["PES"].abs().max()
+    metrics_dict[f'Kleijnen_null_hypothesis_{alpha}level'] = 'rejected' if T > critical_value else 'not rejected' # if rejected, i can say that the kriging model is statistically incompatible with the observed data in terms of predictive performance.
+    # visualization of the test : if there is an error bars that does not cross the 1:1 line, we reject h0. 
+    cv_df['ci']= critical_value * np.sqrt(cv_df.ss_pred)
+    return cv_df, alpha, metrics_dict
+
 def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
     """ This function computes and saves cross-validation results/plots
     from the given cv_df dataframe containing predictions z_pred and observations z_obs.
@@ -1065,29 +1137,10 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
         - cv_df : pandas df
         - fp : str, output path
     """
-    metrics_dict = {}
+    cv_df, alpha, metrics_dict = compute_ked_metrics_dict(cv_df)
 
-    # BASIC METRICS 
-    cv_df['residual']=cv_df.z_obs - cv_df.z_pred
-    metrics_dict['RMSE'] = utils.RMSE(cv_df.z_obs,cv_df.z_pred)
-    metrics_dict['MAE'] = utils.MAE(cv_df.z_obs,cv_df.z_pred)
-    metrics_dict['mean_bias'] = np.mean(cv_df.residual)
-    metrics_dict['logbias'] = utils.logbias(cv_df.z_obs,cv_df.z_pred)
-    metrics_dict['R_obs_pred'],_ = pearsonr(cv_df.z_obs,cv_df.z_pred)
-    metrics_dict['R_pred_res'],_ = pearsonr(cv_df.z_pred,cv_df.residual)
-    
-    # STATISTICAL TEST 
-    # from Kleijnen & Van Beers 2021 
-    # https://www.researchgate.net/publication/354256613_Statistical_Tests_for_Cross-Validation_of_Kriging_Models)
-    alpha = 0.05 # max acceptable type I error rate 
-    cv_df['PES'] = utils.PES(cv_df.z_obs,cv_df.z_pred,cv_df.ss_pred)
-    critical_value = norm.ppf(1 - alpha/(2*len(cv_df))) # Bonferroni correction
-    T = cv_df["PES"].abs().max()
-    metrics_dict[f'Kleijnen_null_hypothesis_{alpha}level'] = 'not rejected' if T > critical_value else 'rejected' # if not rejected, i can say that the kriging model is statistically compatible with the observed data in terms of predictive performance.
-    # visualization of the test : if there is an error bars that does not cross the 1:1 line, we cannot reject h0. 
-    cv_df['ci']= critical_value * np.sqrt(cv_df.ss_pred)
     putils.plot_scatter_with_ci(cv_df,alpha,fp=f'{fp}PES_scatterplot.png')
-    
+
     # save cross val df and metrics
     cv_df.to_csv(f'{fp}crossval_df.csv')
     with open(f'{fp}crossval_metrics.json','w') as file :
@@ -1100,7 +1153,7 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
                                                qty_col='residual',
                                                save_fp=f'{fp}LOO_residuals_map.png',
                                                s=25,
-                                               cmap='managua',
+                                               cmap='seismic',
                                                cmap_sym0=True,
                                                qty_label=r'$\delta^{18}\text{O}_p$ residuals',
                                                figsize=(10,5),

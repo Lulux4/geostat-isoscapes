@@ -178,8 +178,8 @@ def clean_sisal_data(sisal_dict: dict) -> dict :
     final_entity_df = entity_df2[entity_df2["entity_id"].isin(sample_df5["entity_id"])]
     final_d18O_df = d18O_df[d18O_df["sample_id"].isin(sample_df5["sample_id"])]
     final_site_df = site_df[site_df["site_id"].isin(final_entity_df["site_id"])]
-    
-    return {'sample': sample_df4,
+
+    return {'sample': sample_df5,
             'entity': final_entity_df,
             'd18O': final_d18O_df,
             'site': final_site_df,
@@ -354,7 +354,7 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
         # print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
-def retrieve_T_RegularGridInterp( data_df : DataFrame, 
+def retrieve_T_RegularGridInterp(data_df : DataFrame, 
                                  temp_xda : DataArray, 
                                  method : str = 'linear',
                                  data_lon_col='longitude',
@@ -366,7 +366,7 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame,
     Inputs :
         - data_df : DataFrame containing columns 'latitude', ' longitude', chrono. The chrono column should contain **positive** ages in yrs BP
         - temp_xda : DataArray containing a global temperature dataset with dimensions 'lat','lon','time'. 
-                     Time is a **negative** age in yrs BP (i.e. -1000 stands for 1000 yrs BP).
+                    
         - method : str of the name of the method to use to interpolate the temperature data points. Supported : "linear", "nearest", "slinear", "cubic", "quintic" and "pchip".
     Output : 
         - data_df : with an exra column 'T_interp' containing the temperature associated to each sample row.
@@ -377,6 +377,21 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame,
     temp_times = temp_xda['time'].values.copy()
     temp_values = temp_xda.values
 
+    # check that all lons and lats are defined in the right convention 
+    if any(temp_lats>90):
+        temp_lats = utils.convert_lat_0_180_to_neg90_90(temp_lats)
+        # sort latitudes (ow it breaks RegularGridInterpolator)
+        lat_idx = np.argsort(temp_lats)
+        temp_lats = temp_lats[lat_idx]
+        temp_values = temp_values[..., lat_idx]
+    
+    if any(temp_lon>180):
+        temp_lon = utils.convert_lon_0_360_to_neg180_180(temp_lon)
+        # sort longitudes (ow it breaks RegularGridInterpolator)
+        lon_idx = np.argsort(temp_lon)
+        temp_lon = temp_lon[lon_idx]
+        temp_values = temp_values[..., lon_idx]
+
     interp_func = RegularGridInterpolator(
         points = (temp_times, temp_lats, temp_lon),
         values = temp_values,
@@ -386,9 +401,15 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame,
     )
 
     # set up sample points for interpolation
-    sample_times = - data_df['age'].values # type: ignore
-    sample_lats = data_df[data_lat_col].values
-    sample_lons = data_df[data_lon_col].values
+    sample_times = np.asarray(data_df['age'].values)
+    sample_lats = np.asarray(data_df[data_lat_col].values)
+    sample_lons = np.asarray(data_df[data_lon_col].values)
+
+    # check that all lons and lats are defined in the right convention 
+    if any(sample_lats> 90):
+        sample_lats = utils.convert_lat_0_180_to_neg90_90(sample_lats)
+    if any(sample_lons> 180):
+        sample_lons = utils.convert_lon_0_360_to_neg180_180(sample_lons)
 
     points = np.column_stack([sample_times, sample_lats, sample_lons]) # type: ignore
 
@@ -400,6 +421,7 @@ def retrieve_T_RegularGridInterp( data_df : DataFrame,
 def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_xda : DataArray, method : str = 'linear', verbose: bool = True)-> DataFrame :
     ''' 1) retrieves temperature of data_df samples based on the temp_xda datarray provided (interpolation with specified method + NN as backup) 
         2) convert speleothem PDB d18O into precipitation VSMOW d18O using Tremaine equation.
+        Be careful : the convention for the dates should be the same for both data_df and temp_xda (for instance, time dim can be years before present, so that 12 means 12 years BP.)
     Inputs :  TODO
     Outputs : TODO
     '''

@@ -10,10 +10,11 @@ import os
 import statsmodels.api as sm
 from statsmodels.regression.linear_model import OLS
 from scipy.linalg import lstsq
+from sklearn.neighbors import BallTree
 
-############################################
+# ==========================================
 # ROOT DIR RETRIEVAL
-############################################
+# ==========================================
 def get_project_root():
     current_file = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file)
@@ -53,17 +54,37 @@ def prepare_ds_of_ked_isoscsape(ked_df : pd.DataFrame)->xr.Dataset :
 
 
 def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
-    ''' This function bins a pandas Series according to the given bin width.
-    It returns the binned Series.
-    The values in this series are the bins label, which is defined as the lower bound of the bin range. 
+    """ This function bins a pandas Series with integer bin labels according to the given bin width.
+    
+    This function outputs the series of bins labels, which are defined as the lower bound of each bin range. 
     E.g : bin "0" spans [0,0+width[.
+
+    If the series has positive and negative values, the binning forces the creation of bins from 0 to the max, and from 0 to the min in the reverse direction.
+    Ex : [-19,-16,-4,-1,2,6,8,18] with a bin width of 5 is binned as [-15,-15,-5,-5,0,5,5,15].
+    
     Inputs :
         - series : pd.Series containing float values to bin
         - bin_width : integer of the desired bin width 
     Outputs : 
-        - binned_series : pd.Series containing the bin label associated of each item. 
-    '''
-    bins = list(range(int(series.min()), int(series.max())+ bin_width + 1, bin_width))
+         - binned_series : pd.Series containing the bin label associated of each item. 
+    """
+    bins=None
+    if series.max() > 0 :
+        start = max(0,series.min())
+        bins_pos = np.array(range(int(start), int(series.max())+ bin_width + 1, bin_width))
+        bins = list(bins_pos)
+    if series.min()<0 :
+        start = min(0-bin_width,series.max())
+        stop = min(series.min(),start-bin_width)
+        bins_neg = np.sort(- np.array(range( - int(start), -int(stop), bin_width)))
+        if bins is not None : 
+            bins = list(np.concat([bins_neg,bins_pos]))
+        else :
+            bins = list(bins_neg)
+    
+    if bins is None : # sanity check
+        raise ValueError('this series does not contain numbers or is empty.')
+
     binned_series = pd.cut(series, bins, labels = bins[:-1],right=False)
     return binned_series
 
@@ -76,10 +97,10 @@ def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray :
     da_binned = da_binned.rename({'time_bins': 'time'})
     return da_binned.assign_coords(time=bins[:-1])
 
-def get_yrBP_from_itrace_time(months_after_start : int | pd.Series, start_year : float = 12001)->float:
+def get_yrBP_from_itrace_time(months_after_start : int | pd.Series | np.ndarray, start_year : float = 12001)-> float| np.ndarray| pd.Series:
     """ Retrieve the year (+decimals) depending on a start year in yr BP (positive number) and the number of months spent since this start year.
     """
-    return -( -start_year + months_after_start/12) # type:ignore
+    return -( -start_year + months_after_start/12)
 
 # =============================================================================================
 # "Spatial" computations
@@ -184,6 +205,13 @@ def haversine(u, v):
     dlon = lon2 - lon1
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     return 2 * 6371 * np.arcsin(np.sqrt(a)) # since earth radius = approx 6371 km
+
+def dist_to_nn_on_sphere(points):
+    ''' TODO : to test and write description'''
+    coords_radians = np.deg2rad(points[["lat","lon"]].values)
+    tree = BallTree(coords_radians,metric='haversine')
+    dists,inds = tree.query(coords_radians,k=2)
+    return dists[:,1] * 6371.0 #km
 
 def canonical_lines(lines):
     """ Lines is an array of shape N*2*2 (N lines consituted by a start point and an end point, each with 2 coordinates).
@@ -351,3 +379,49 @@ def PES(z_obs,z_pred,ss_pred):
 def logbias(y_true,y_pred):
     """ Log bias metric (dB) """
     return 10.0*np.log10(np.sum(y_true)/np.sum(y_pred))
+
+######## Temperature data loader
+def get_itrace_temperature_dataset(
+        data_folder = "/media/luluxette/T7_Shield/pdm/iTrace/",
+        sim_prefix = 'b.e13.Bi1850C5.f19_g16',
+        sim_kyr = 12,
+        true_kyr = 12,
+        sim_forcings = 'ice_ghg_orb_wtr',
+        sim_num = '05',
+        sim_model = 'clm2.h0',
+        sim_suffix = '800001-899912',
+        res=12,
+        regions : tuple[str,list[str]]| None = None,
+        buffer_km : float = 50,
+        format : str = 'df',
+        verbose : bool = True) :
+    """ TODO 
+    res : in ***MONTHS***
+    format : df or xr
+    """
+    if verbose : print('loading itrace temperature file...')
+    fn_itrace_TREFHT = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}.TREFHT.{sim_suffix}.nc'
+    file_TREFHT = load_xarray_datarray(fn_itrace_TREFHT)
+    TREFHT_da = file_TREFHT.TREFHT 
+    # Switch the time dimension to yr BP unit.
+    if verbose : print('This dataset contains ',len(TREFHT_da.time), ' time steps.') # just to check
+
+    timearray = get_yrBP_from_itrace_time(np.array(range(0,len(TREFHT_da.time),1)),true_kyr*1000)
+    TREFHT_da = TREFHT_da.assign_coords(time=('time',-timearray)) # type:ignore # we keep the minus sign to conserve the order 20 ka BP before 19 ka BP (for the binning)
+    TREFHT_da = TREFHT_da.assign_coords(time = TREFHT_da.time.assign_attrs(units=f"years before present (1950)"))
+
+    if res is not None :
+        if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
+        TREFHT_da = bin_xrDataArray_time(TREFHT_da,res=res//12) # since TREFHT is now in yr BP, we need res to be in years
+    if regions is not None :
+        TREFHT_da = mask_regions_shape(TREFHT_da,buffer_km=buffer_km,regions=regions)  
+    TREFHT_da = TREFHT_da.assign_coords(time=('time',-TREFHT_da.time.values)) # type:ignore # remove the minus sign of the ka BP values
+
+    # output in chosen format : df of xrdataarray.
+    if format=='xr' : return TREFHT_da
+    if verbose : print('   converting xr to DataFrame...')
+    if format=='df' :
+        TREFHT_df = TREFHT_da.to_dataframe(name='TREFHT').reset_index().dropna() #type:ignore
+        print('done')
+        return TREFHT_df
+    raise ValueError('format must be either df or xr.')
