@@ -6,7 +6,8 @@ src/geostat_isoscapes_tools/__pycache__
 data/temperature/temp_800ka_ann.nc
 data/temperature/CRUTS04/
 data/modern/iTrace/
-data/modern/RCWIP2_isoscape/
+data/modern/RCWIP2_isoscape/tif_files/
 data/shapefiles/
 problems/
 .vscode/
+data/modern/RCWIP2_isoscape/README.docx
