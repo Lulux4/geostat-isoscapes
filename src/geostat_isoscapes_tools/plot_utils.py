@@ -217,6 +217,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
             zorder=3)
     
     # Overlay the vario model is given
+    textstr = None
     if (plot_model) and (model_name is not None) and (model_fct is not None):
         h = np.linspace(0,bin_edges.max(),300)
         ax.plot(h,
@@ -301,13 +302,14 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
             frameon=False,
             fontsize=12,
         )
-        ax_info.text(textbox_loc[0],textbox_loc[1], textstr, # type:ignore
-                    transform=ax_info.transAxes,
-                    fontsize=12,
-                    va='bottom',
-                    ha='left',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.85)
-                    )
+        if textstr is not None :
+            ax_info.text(textbox_loc[0],textbox_loc[1], textstr, # type:ignore
+                        transform=ax_info.transAxes,
+                        fontsize=12,
+                        va='bottom',
+                        ha='left',
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.85)
+                        )
         ax_info.axis('off')
         
     if ax_ is None :
