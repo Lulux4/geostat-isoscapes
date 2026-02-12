@@ -9,17 +9,19 @@ import numpy as np
 
 sns.set_style('dark')
 
-###############################################
-# Define parameters to apply successively
-###############################################
+# ==========================================================================================
+# CONFIGURATION
+# ==========================================================================================
+# NAME OF EXPERIMENT
+exp_name = 'tests2026-02-12'
 
-# DATASETS TO STUDY :
-sisal = False
-itrace = True
+# DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
+sisal = True
+itrace = False
 
 # PARAMETERS LISTS :
 
-mask_itrace_around_sisal_pts = False
+mask_itrace_around_sisal_pts = True # variogrphy on itrace masked at sisal points?
 mask_radius = 1000
 
 trends = [
@@ -48,7 +50,7 @@ itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (
 with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
     itrace_sims = json.load(f)
 
-# keep only the simulations of interest (the key represent 1000 yr BP slices)
+# keep only the simulations of interest (each key represent a 1000 yr slice)
 sims = dict((k,itrace_sims[k]) for k in (
     '12',
     '13',
@@ -61,52 +63,37 @@ sims = dict((k,itrace_sims[k]) for k in (
     '20'
     ) if k in itrace_sims)
 
-# or if not computing on itrace, just define a dummy key for accessing a sisal slice
-# sims = {'1':{},  # slice 0-1000 yr BP
-#         'all':{} # all time points
-#         }
+# If not computing on itrace, define instead a dummy key for accessing a sisal slice or all times
+# e.g. : sims = {'1':{}}  for the slice 0-1000 yr BP or sims={'all':{} } for all time points
+sims = {'all':{}}
 
 res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
 
 verbose = False
 
-# geographical regions on which to mask itrace/sisal data for the variogram computations
+# Geographical regions on which to mask itrace/sisal data for the variogram computations
 # default is [None], otherwise list[ tuple( str,list[str] ) ] such as [('subregion',['Western Europe','Southern Europe']),.....]
 regions_list = [
     None
     # ('continents',['South America','North America','Europe','Asia','Oceania','Africa'])
-    # ('countries',['United States of America','Mexico'])
-    # ('continents',['South America']),
-    # ('continents',['North America']),
-    # ('subregions',['Nothern Europe','Southern Europe','Western Europe']),
-    # ('continents',['Asia']),
-    # ('continents',['Oceania']),
-    # ('continents', ['Africa']),
-    # ('countries',['China']),
-    # ('countries',['United States of America']),
-    # ('countries',['Canada']),
-    # ('countries',['Australia']),
-    # ('countries',['Brazil']),
-    # ('countries',['France']),
-    # ('countries',['China']),
-    # ('countries',['Bolivia']),
-    # ('countries',['South Africa']),
-    # ('countries',['Afghanistan'])
     ] 
-# buffer to keep some data around the regions boundaries (typically for country-sized regions) 
+# Buffer to keep some data around the regions boundaries (typically for country-sized regions) 
 buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb with antimeridional line
 
-# Variogram model to try to fit
+# Variography parameters
 model_name = 'spherical'
 maxlag = 8.5e6
 nlags = 15
-bin_func = 'even'
-if not ('+' in model_name) :
+bin_func = 'uniform'
+weighting = 'lags'
+weights_power = 0.5
+
+if not ('+' in model_name) : # bounds for a simple model (spherical, gaussian, exp)
     model_bounds = (
         np.array([
             0.0,   # min range
             0.0,   # min sill
-            1.0]), # min nugget  : here you can force the model to have non-zero nugget
+            0.2]), # min nugget  : here you can force the model to have non-zero nugget
         np.array([
             maxlag,# max range 
             50,    # max sill
@@ -114,7 +101,7 @@ if not ('+' in model_name) :
         ])
     )  # max nugget 
 else :
-    model_bounds = (
+    model_bounds = ( # bounds for composite model (two models, 5 parameters)
         np.array([
             1.0,   # min nugget
             0.0,   # min range1
@@ -132,9 +119,7 @@ else :
     )
 
 # Naming convention of columns
-data_cols = {'lat':'lat',
-            'lon':'lon',
-            'quantity':'d18Op'}
+data_cols = {'lat':'lat','lon':'lon','quantity':'d18Op'}
 cols_sisal = ['binned_age','lat','lon','site_id','d18Op_VSMOW_exactconv']
 
 # Prepare the iterations 
@@ -151,11 +136,14 @@ for res_months,kyr,regions,trend,azimuth in iters :
     print('====================================================================================================================')
     # ======================= CONFIGURATION =======================
     params = {
+        'exp_name' :exp_name,
         'kyr' : kyr,
         'trend_before_mask': True,
         'maxlag': maxlag,
         'nlags': nlags,
         'bin_func':bin_func,
+        'weighting':weighting,
+        'weights_power':weights_power,
         'centers': None,
         'trend':trend,
         'tolerance' : 22.5,
@@ -179,13 +167,13 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                 'suffix': sims[kyr]['suffix'], 
                                                 'prefix':'b.e13.Bi1850C5.f19_g16'}
     
-        fp_itrace = f"{utils.get_project_root()}/output/variograms/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
+        fp_itrace = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
         if mask_itrace_around_sisal_pts :
             fp_itrace = fp_itrace + f"sisal_mask_{mask_radius}km/"
         else : 
             fp_itrace = fp_itrace + "no_mask/"
     if sisal : 
-        fp_sisal = f"{utils.get_project_root()}/output/variograms/sisal/slice{params['kyr']}kyrBP/res{params['res [months]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
+        fp_sisal = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/sisal/slice{params['kyr']}kyrBP/res{params['res [months]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
     if regions is not None :
         str_regions = ''
         for r in regions[1]: #type:ignore
@@ -208,9 +196,11 @@ for res_months,kyr,regions,trend,azimuth in iters :
     if (sisal & (tmp_res!=res_months)) | (mask_itrace_around_sisal_pts & init):
         # print('----- New sisal resolution : loading sisal global df')
         sisal_df_global = gutils.get_sisal_data_for_kriging(res=int(res_months/12),
-                                                                    regions=None,
-                                                                    buffer_km=buffer_km,
-                                                                    verbose=verbose)
+                                                            temp_ds_name='itrace',
+                                                            temp_ds_path=itrace_folder,
+                                                            regions=None,
+                                                            buffer_km=buffer_km,
+                                                            verbose=verbose)
         sisal_df = sisal_df_global
         sisal_change = True
         init=False # even if res changes again, we will not need to reload sisal for adapting the mask
@@ -295,6 +285,8 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                                                     gammas=dict_dfs[key]['df']['gamma'],
                                                                                     model_name=model_name,
                                                                                     bounds=params['model_bounds'],
+                                                                                    weighting=params['weighting'],
+                                                                                    weights_power=params['weights_power'],
                                                                                     pair_counts=dict_dfs[key]['df']['count']
                                                                                     ) 
         if key.startswith('i'):

@@ -777,7 +777,7 @@ def effective_range(bins, fitted_fct, frac=0.95):
     idx = np.where(gamma >= frac*sill_total)[0]
     return h[idx[0]] if len(idx) > 0 else np.nan
 
-def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=None, bounds = None, weighting = None, pair_counts=None,lag_weights_power=0.5):
+def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=None, bounds = None, weighting = None, pair_counts=None,weights_power=0.5):
     """
     Fit a theoretical variogram model to empirical data (distances=bins and semivariances=gammas).
     Weighting : either None, or more weight to short lags, or more weight to lags with the most pairs.
@@ -795,6 +795,7 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
         - pair_counts : array or None.
             number of pairs in each bin, used for weighting the fit (not mandatory)
         - weighting : method for weighting the fit.
+        - weights_power : float, rules the intensity of the weighting (e.g 0.5 = inversely proportional to the sqrt, 2 = inv. prop. to the square....)
     Outputs : 
         - params : dict
             Optimal parameters
@@ -827,7 +828,7 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
             vals_to_weight = bins / np.nanmin(bins) # shortest lag = 1 ... largest lag = x (>1) times the shortest
         elif (pair_counts is not None) & (weighting == 'pair_counts'):
             vals_to_weight = np.nanmax(pair_counts) / pair_counts #type:ignore # lag with the most pairs = 1 ... lag with least pairs =  x (>1) times less than the lag with most pairs
-        sigma = vals_to_weight**lag_weights_power # increases the power of the weighting.
+        sigma = vals_to_weight**weights_power # increases the power of the weighting.
     else :
         sigma = None
     try : 
