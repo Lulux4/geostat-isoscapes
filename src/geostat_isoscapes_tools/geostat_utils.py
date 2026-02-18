@@ -14,7 +14,7 @@ import pandas as pd
 from . import utils,sisal_utils,variogram_models
 from skgstat.MetricSpace import MetricSpace
 from scipy.spatial.distance import squareform
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, griddata
 from shapely.geometry import Point
 from shapely.ops import nearest_points
 import geopandas as gpd
@@ -777,12 +777,12 @@ def effective_range(bins, fitted_fct, frac=0.95):
     idx = np.where(gamma >= frac*sill_total)[0]
     return h[idx[0]] if len(idx) > 0 else np.nan
 
-def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=None, bounds = None, weighting = None, pair_counts=None,weights_power=0.5):
+def fit_variogram_model(bin_edges, gammas, model_name='spherical', initial_params=None, bounds = None, weighting = None, pair_counts=None,weights_power=0.5):
     """
     Fit a theoretical variogram model to empirical data (distances=bins and semivariances=gammas).
     Weighting : either None, or more weight to short lags, or more weight to lags with the most pairs.
     Inputs :
-        - bins : array
+        - bin_edges : array
             Lag distances
         - gammas : array
             Semivariances
@@ -808,7 +808,10 @@ def fit_variogram_model(bins, gammas, model_name='spherical', initial_params=Non
         raise ValueError('Parameter weighting must be None, lags or pair_counts.')
     if (weighting == 'pair_counts')&(pair_counts is None):
         raise ValueError('if weighting is set to pair_counts, then the array of pair_counts must be provided in the arguments!')
-   
+    
+    # Define bin centers :
+    bins = bin_edges - np.r_[bin_edges[0],np.diff(bin_edges)]/2
+
     model = variogram_models.define_model(model_name)
     func = model.get_model_func()
     param_names = model.params
@@ -1017,11 +1020,11 @@ def get_preprocessed_itrace_data(res=None,
     if format=='df' :
         if P : 
             d18_P_df= d18_P_ds.to_dataframe().reset_index().dropna(subset=['P','d18Op'])
-            print('done')
+            print('itrace df ready')
             return d18_P_df
         else :
             d18_df = delta18.to_dataframe(name='d18Op').reset_index().dropna() #type:ignore
-            print('done')
+            print('itrace_df ready')
             return d18_df
 
 def ked(df_to_krige : pd.DataFrame,
@@ -1054,11 +1057,10 @@ def ked(df_to_krige : pd.DataFrame,
     df_to_krige['x'],df_to_krige['y'] = project_coords(df_to_krige[lon].values,df_to_krige[lat].values)
     df_ext_drift['x'],df_ext_drift['y'] = project_coords(df_ext_drift[lon].values,df_ext_drift[lat].values)
         
-    # Prepare cKDTree for retrieving the value of the external drift at observation points.
+    # Prepare grid points for linear interpolation of external drift values at observation points.
     lats_obs = df_to_krige[lat]
     lons_obs  = df_to_krige[lon]
     grid_points = np.column_stack((df_ext_drift[lat], df_ext_drift[lon]))
-    tree = cKDTree(grid_points)
 
     # handle the cross validation context 
     if isinstance(cv_mask,np.ndarray) :
@@ -1069,17 +1071,17 @@ def ked(df_to_krige : pd.DataFrame,
         x_pred_grid = df_validation.x.values
         y_pred_grid = df_validation.y.values
         pred_latlon = df_validation[[lat,lon]]
-        # Query nearest grid point for each...
+        # Linear interpolation of external drift values at observation points
         # ... observation that will be in the kriging df  :
-        _, idxs_in = tree.query(np.column_stack((df_to_krige[lat], df_to_krige[lon])))
-        drift_at_obs = df_ext_drift[qty].values[idxs_in]
+        obs_points_in = np.column_stack((df_to_krige[lat], df_to_krige[lon]))
+        drift_at_obs = griddata(grid_points, df_ext_drift[qty].values, obs_points_in, method='linear')
         # ... observation that will be in the validation set 
-        _, idxs_out = tree.query(np.column_stack((df_validation[lat], df_validation[lon])))
-        drift_at_obs_val = df_ext_drift[qty].values[idxs_out]
+        obs_points_out = np.column_stack((df_validation[lat], df_validation[lon]))
+        drift_at_obs_val = griddata(grid_points, df_ext_drift[qty].values, obs_points_out, method='linear')
         drift_pred_grid = [drift_at_obs_val]
     else :
-        _, idxs = tree.query(np.column_stack((lats_obs, lons_obs)))
-        drift_at_obs = df_ext_drift[qty].values[idxs]
+        obs_points = np.column_stack((lats_obs, lons_obs))
+        drift_at_obs = griddata(grid_points, df_ext_drift[qty].values, obs_points, method='linear')
         pred_latlon = df_ext_drift[[lat,lon]]
         x_pred_grid = df_ext_drift.x.values
         y_pred_grid = df_ext_drift.y.values

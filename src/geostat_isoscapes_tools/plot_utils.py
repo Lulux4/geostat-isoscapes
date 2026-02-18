@@ -206,13 +206,13 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
     colors=sns.color_palette('colorblind')
     
     # Empirical vario 
-    ax.plot(bin_edges, #(gstat logic is to work with bin edges rather than centers)
+    ax.scatter(bin_centers,
             gamma,
-            marker='o',
-            linewidth=1.5,
-            linestyle='--',
-            markersize=5,
-            color=colors[0],
+            marker='+',
+            # linewidth=1.5,
+            # linestyle='--',
+            s=20,
+            c=colors[0],
             label='Empirical variogram',
             zorder=3)
     
