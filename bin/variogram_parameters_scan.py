@@ -13,16 +13,15 @@ sns.set_style('dark')
 # CONFIGURATION
 # ==========================================================================================
 # NAME OF EXPERIMENT
-exp_name = 'tests2026-02-12'
+exp_name = '2026-02-24_sisal_vs_itrace'
 
 # DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
 sisal = True
-itrace = False
+itrace = True
 
 # PARAMETERS LISTS :
-
-mask_itrace_around_sisal_pts = True # variogrphy on itrace masked at sisal points?
-mask_radius = 1000
+mask_itrace_around_sisal_pts = True # variography on itrace masked at sisal points?
+mask_radius = 2000
 
 trends = [
     # 'multiple_linear_ele_D',
@@ -33,17 +32,26 @@ trends = [
     # 'multiple_linear_lat_D',
     # 'multiple_linear_lat_ele_D',
     # None
+    # 'multiple_linear_lat_latquad',
+    # 'multiple_linear_lat_latquad_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_lat_latquad_D',
+    # 'multiple_linear_lat_latquad_ele',
+    # 'multiple_linear_lat_latquad_P_D', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_lat_latquad_ele_P', # /!/ P cannot be retrieved for sisal data
+    'multiple_linear_lat_latquad_ele_D',
+    # 'multiple_linear_lat_latquad_ele_P_D' # /!/ P cannot be retrieved for sisal data
     # 'multiple_linear_latabs_latReLU',
     # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
     # 'multiple_linear_latabs_latReLU_D',
     # 'multiple_linear_latabs_latReLU_ele',
     # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
     # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_latabs_latReLU_ele_D',
-    # 'multiple_linear_latabs_latReLU_ele_P_D' # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_latabs_latReLU_ele_D',
+    # 'multiple_linear_latabs_latReLU_ele_P_D'
+    
     ]
 
-azimuths = [None] # 0 45 90 180 # for directional variograms
+azimuths = [None] # 0,45,90,180] # 0 45 90 180 # for directional variograms
 
 # how to access itrace data ? Need the datafolder (not provided in my repo, seee intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
 itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
@@ -65,10 +73,10 @@ sims = dict((k,itrace_sims[k]) for k in (
 
 # If not computing on itrace, define instead a dummy key for accessing a sisal slice or all times
 # e.g. : sims = {'1':{}}  for the slice 0-1000 yr BP or sims={'all':{} } for all time points
-sims = {'all':{}}
+# sims = {'all':{}}
 
 res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
-
+save_all=  True # whether to save all variograms data (not only the aggregated one over 1000yr).
 verbose = False
 
 # Geographical regions on which to mask itrace/sisal data for the variogram computations
@@ -82,9 +90,9 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variography parameters
 model_name = 'spherical'
-maxlag = 8.5e6
-nlags = 15
-bin_func = 'uniform'
+maxlag = 10e6
+nlags = 10
+bin_func = 'even'
 weighting = 'lags'
 weights_power = 0.5
 
@@ -260,7 +268,8 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                 config_dict=itrace_params,
                                                 data_cols=data_cols,
                                                 mask_pts = sisal_df_valid if mask_itrace_around_sisal_pts else None, # type:ignore # TODO : sisal_df_valid or region? depends on the needs, be careful
-                                                verbose = verbose
+                                                verbose = verbose,
+                                                save_all=save_all
                                             )
     if sisal :
         print('variogram sisal...')
@@ -269,7 +278,8 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                 config_dict=params,
                                                 data_cols=data_cols,
                                                 mask_pts = None,
-                                                verbose = False
+                                                verbose = False,
+                                                save_all=save_all
                                             )
     # Variogram model fitting and plotting (saving results only)
     dict_dfs = {}
@@ -277,17 +287,27 @@ for res_months,kyr,regions,trend,azimuth in iters :
         if itrace :
             if os.path.exists(fp_itrace+f'vario_{a}_df.csv'): # type: ignore
                 dict_dfs[f'i{a}'] = {'df': pd.read_csv(fp_itrace+f'vario_{a}_df.csv')} # type: ignore
+            # if save_all is True, then we should have more variograms df to load, all stored in df_all.csv 
+            if os.path.exists(fp_itrace+f'vario_{a}_df_all_iterations.csv'): # type: ignore
+                df_all = pd.read_csv(fp_itrace+f'vario_{a}_df_all_iterations.csv') # type: ignore
+                for t in df_all['time_slice'].unique():
+                    dict_dfs[f'i{a}_t{int(t)}'] = {'df': df_all.loc[df_all['time_slice']==t]}
         if sisal :
             if os.path.exists(fp_sisal+f'vario_{a}_df.csv'): # type: ignore
                 dict_dfs[f's{a}'] = {'df': pd.read_csv(fp_sisal+f'vario_{a}_df.csv')} # type: ignore
+            if os.path.exists(fp_sisal+f'vario_{a}_df_all_iterations.csv'): # type: ignore
+                df_all = pd.read_csv(fp_sisal+f'vario_{a}_df_all_iterations.csv') # type: ignore
+                for t in df_all['time_slice'].unique():
+                    dict_dfs[f's{a}_t{t}'] = {'df': df_all.loc[df_all['time_slice']==t]}
+
     for key in dict_dfs.keys():
-        dict_dfs[key]['params'],dict_dfs[key]['fct_fitted'],dict_dfs[key]['pcov'] = gutils.fit_variogram_model(bins=dict_dfs[key]['df']['lag'], # type:ignore
-                                                                                    gammas=dict_dfs[key]['df']['gamma'],
+        dict_dfs[key]['params'],dict_dfs[key]['fct_fitted'],dict_dfs[key]['pcov'] = gutils.fit_variogram_model(bin_edges=dict_dfs[key]['df']['lag'].values, # type:ignore
+                                                                                    gammas=dict_dfs[key]['df']['gamma'].values,
                                                                                     model_name=model_name,
                                                                                     bounds=params['model_bounds'],
                                                                                     weighting=params['weighting'],
                                                                                     weights_power=params['weights_power'],
-                                                                                    pair_counts=dict_dfs[key]['df']['count']
+                                                                                    pair_counts=dict_dfs[key]['df']['count'].values
                                                                                     ) 
         if key.startswith('i'):
             fp = fp_itrace
@@ -299,17 +319,18 @@ for res_months,kyr,regions,trend,azimuth in iters :
         print('saving vario parameters')
         with open(f'{fp}variogram_params_{key[1:]}.json', 'w') as filename:
             json.dump(dict_dfs[key]['params'], filename)
-
-        print('plotting and saving figure')
-        fig,ax = putils.plot_variogram_from_bins_and_gamma(bin_edges=dict_dfs[key]['df']['lag'].values,
-                                                gamma=dict_dfs[key]['df']['gamma'].values,
-                                                title=f'- {title} - {int(kyr)-1} to {kyr} kyr BP' if kyr !='all' else 'all times',
-                                                counts=dict_dfs[key]['df']['count'].values,
-                                                plot_model=True,
-                                                model_name=model_name,
-                                                model_fct=dict_dfs[key]['fct_fitted'],
-                                                model_params=dict_dfs[key]['params'],
-                                                save_name=f'{fp}fig_{key[1:]}.png'
-                                                ) # type:ignore
+        
+        if not('t' in key): # we do not want to save thousands of plots 
+            print('plotting and saving figure')
+            fig,ax = putils.plot_variogram_from_bins_and_gamma(bin_edges=dict_dfs[key]['df']['lag'].values,
+                                                    gamma=dict_dfs[key]['df']['gamma'].values,
+                                                    title=f'- {title} - {int(kyr)-1} to {kyr} kyr BP' if kyr !='all' else 'all times',
+                                                    counts=dict_dfs[key]['df']['count'].values,
+                                                    plot_model=True,
+                                                    model_name=model_name,
+                                                    model_fct=dict_dfs[key]['fct_fitted'],
+                                                    model_params=dict_dfs[key]['params'],
+                                                    save_name=f'{fp}fig_{key[1:]}.png'
+                                                    ) # type:ignore
 
     plt.close('all')

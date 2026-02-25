@@ -549,6 +549,8 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
                                     lat: str = 'lat',
                                     lon : str ='lon',
                                     const_coords : bool = False,
+                                    save_all : bool = False,
+                                    fp : str|None = None,
                                     verbose : bool =False):
     """
     Vario computation looping over an xarray dataset.
@@ -685,6 +687,18 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
         quantity = quantity_tmp
         trend  = trend_tmp
 
+    if (save_all) & (fp is not None): 
+        # save all the gammas and bin counts of each iteration in a csv file
+        df_all_list = []
+        for i,t in enumerate(np.sort(np.unique(np.array(data.time.values)))) : # for all time steps 
+            df_iter = pd.DataFrame({'time_slice':t,'lag':ref_bins,'gamma':gammas[i],'count':bin_counts[i]})
+            df_all_list.append(df_iter)
+        df_all = pd.concat(df_all_list)
+        df_all.to_csv(f'{fp}vario_{direction}_df_all_iterations.csv',index=False)
+        # save also the trend results 
+        with open(f'{fp}trend_metrics{direction}_all_iterations.json', 'w') as f:
+            json.dump(trend_results, f)
+
     return bin_counts, gammas, ref_bins, trend_results
 
 def aggregate_variograms(bin_counts,gammas,bins):
@@ -709,9 +723,10 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                                      config_dict : dict, 
                                      mask_pts : pd.DataFrame | None = None,
                                      data_cols : dict = {'lat':'lat','lon':'lon','quantity':'d18Op'},
-                                     verbose : bool = False):
+                                     verbose : bool = False,
+                                     save_all : bool = False):
     """ TODO """
-    # if a mask must be applied, define it here 
+    # if a mask must be applied, define it here
     mask_df = None
     if mask_pts is not None :
         if verbose : print('Defining spatial mask around anchor points')
@@ -754,7 +769,9 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                                                                                 lat = data_cols['lat'],
                                                                                 lon = data_cols['lon'],
                                                                                 verbose=verbose,
-                                                                                const_coords=config_dict['const_coords'])
+                                                                                const_coords=config_dict['const_coords'],
+                                                                                save_all=save_all,
+                                                                                fp=fp)
     # aggregate semivariances
     if verbose : print('Aggregate variograms')
     df_all = aggregate_variograms(bin_counts=bin_count,gammas=gammas,bins=ref_bins) # df_all can be None if all variograms computations failed at previous step
@@ -1113,16 +1130,18 @@ def ked(df_to_krige : pd.DataFrame,
         df_pred['z_obs']=df_validation[qty].values
     return df_pred
 
-def compute_ked_metrics_dict(cv_df):
-    ''' TODO '''
+def compute_ked_metrics_dict(cv_df,alpha=0.10):
+    ''' TODO :
+    alpha = max Type 1 error rate
+    '''
     metrics_dict = {}
     # COMPUTE DISTANCE TO NN
     cv_df['dist_nn'] = utils.dist_to_nn_on_sphere(points=cv_df[['lon','lat']])
     # BASIC METRICS
-    cv_df['residual']=cv_df.z_obs - cv_df.z_pred
+    cv_df['residual']= cv_df.z_pred - cv_df.z_obs # positive res : overestimating
     metrics_dict['RMSE'] = utils.RMSE(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['MAE'] = utils.MAE(cv_df.z_obs,cv_df.z_pred)
-    metrics_dict['mean_bias'] = np.mean(cv_df.residual)
+    metrics_dict['ME'] = np.mean(cv_df.residual)
     metrics_dict['logbias'] = utils.logbias(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['R_obs_pred'],_ = pearsonr(cv_df.z_obs,cv_df.z_pred)
     metrics_dict['R_pred_res'],_ = pearsonr(cv_df.z_pred,cv_df.residual)
@@ -1131,7 +1150,6 @@ def compute_ked_metrics_dict(cv_df):
     # from Kleijnen & Van Beers 2021 
     # https://www.researchgate.net/publication/354256613_Statistical_Tests_for_Cross-Validation_of_Kriging_Models)
     # H0 = "the observed spatial field at time t is a realization of the KED model"
-    alpha = 0.05 # max acceptable type I error rate 
     cv_df['PES'] = utils.PES(cv_df.z_obs,cv_df.z_pred,cv_df.ss_pred) 
     critical_value = norm.ppf(1 - alpha/(2*len(cv_df))) # Bonferroni correction
     cv_df['|PES| > critical_val'] = abs(cv_df.PES) > critical_value
@@ -1141,15 +1159,16 @@ def compute_ked_metrics_dict(cv_df):
     cv_df['ci']= critical_value * np.sqrt(cv_df.ss_pred)
     return cv_df, alpha, metrics_dict
 
-def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str):
+def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str,alpha=0.10):
     """ This function computes and saves cross-validation results/plots
     from the given cv_df dataframe containing predictions z_pred and observations z_obs.
     THe cv_df also needs to contains columns 'site_name','lon','lat'.
     Inputs : 
         - cv_df : pandas df
         - fp : str, output path
+        - alpha : float, max type 1 error rate for the Kleijnen test. Default to 0.10.
     """
-    cv_df, alpha, metrics_dict = compute_ked_metrics_dict(cv_df)
+    cv_df, alpha, metrics_dict = compute_ked_metrics_dict(cv_df,alpha=alpha)
 
     putils.plot_scatter_with_ci(cv_df,alpha,fp=f'{fp}PES_scatterplot.png')
 
