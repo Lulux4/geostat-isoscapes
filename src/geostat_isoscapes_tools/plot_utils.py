@@ -196,7 +196,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
             nrows=1,
             ncols=2,
             width_ratios=[3.2, 1.2],
-            wspace=0.2
+            wspace=0.1
         )
         ax = fig.add_subplot(gs[0, 0])
         ax_info = fig.add_subplot(gs[0, 1])
@@ -211,8 +211,8 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
             marker='+',
             # linewidth=1.5,
             # linestyle='--',
-            s=20,
-            c=colors[0],
+            s=50,
+            c='black',#colors[0],
             label='Empirical variogram',
             zorder=3)
     
@@ -235,7 +235,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
                 nugget =model_params['nugget']
                 sill = model_params['sill']+nugget
                 ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label="Range")
-                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Sill")
+                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Total sill")
             else:
                 range_ = gutils.effective_range(bin_edges,model_fct,0.95)
                 nugget= model_params['nugget']
@@ -247,7 +247,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
             if counts is not None : 
                 weights = gutils.get_weights_from_pair_counts(counts)
             r2 = utils.r2(gamma, model_fct(bin_edges), weights=weights)
-            textstr = rf"$\bf{{Range:}}$ {range_:.2e}m""\n"rf"$\bf{{Sill:}}$ {sill:.2f}‰$^2$""\n"rf"$\bf{{Nugget:}}$ {nugget:.2f}‰$^2$""\n"rf"$\bf{{R^2:}}$ {r2:.2f}"
+            textstr = rf"$\bf{{Range:}}$ {range_:.2e}m""\n"rf"$\bf{{Total~sill:}}$ {sill:.2f}‰$^2$""\n"rf"$\bf{{Nugget:}}$ {nugget:.2f}‰$^2$""\n"rf"$\bf{{R^2:}}$ {r2:.2f}"
     # Compute widths :
     widths = np.diff(bin_edges)
     widths = np.r_[bin_edges[0],widths]
@@ -313,7 +313,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
         ax_info.axis('off')
         
     if ax_ is None :
-        plt.title(f"Empirical variogram {title}")
+        plt.title(title)
         if save_name is not None:
             plt.savefig(save_name,dpi=500,bbox_inches='tight')
         return fig,ax
