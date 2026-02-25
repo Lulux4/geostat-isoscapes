@@ -339,7 +339,8 @@ def r2(y_true : np.ndarray, y_pred : np.ndarray, weights = None) -> float:
     """
     if weights is None : 
         weights = np.ones_like(y_true)
-    sst = np.nansum(weights * (y_true - np.nanmean(y_true))**2)
+    weighted_mean = np.nansum(weights * y_true) / np.nansum(weights)
+    sst = np.nansum(weights * (y_true - weighted_mean)**2)
     ssr = np.nansum(weights * (y_true - y_pred)**2)
     r2 = 1 - (ssr / sst)
     return r2
@@ -349,7 +350,8 @@ def r2_adj(y_true : np.ndarray, y_pred : np.ndarray, p : int, weights = None):
     if weights is None : 
         weights = np.ones_like(y_true)
     n = len(y_true)
-    sst = np.nansum(weights * (y_true - np.nanmean(y_true))**2)
+    weighted_mean = np.nansum(weights * y_true) / np.nansum(weights)
+    sst = np.nansum(weights * (y_true - weighted_mean)**2)
     ssr = np.nansum(weights * (y_true - y_pred)**2)
     adj_r2 = 1 - (ssr/(n-p-1)) / (sst/(n-1))
     return adj_r2
