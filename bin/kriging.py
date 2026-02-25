@@ -13,11 +13,19 @@ sns.set_style('dark')
 # Define the experimental setup
 # ==================================
 
-exp_name  = 'run_2026_02_11_Titrace' # name of expermiment 
+exp_name  = 'run_2026_02_25/allvario/alpha05/' # name of expermiment 
 
-# vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
-# vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
-vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
+## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
+## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
+
+# final results with the aggregated vario :
+# vario_path = f'{utils.get_project_root()}/output/variograms/2026-02-24_sisal_vs_itrace/itrace/vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json'
+# vario_subfolders = None
+# or with the vario params at each time step:
+vario_path = f'{utils.get_project_root()}/output/variograms/2026-02-24_sisal_vs_itrace/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
+vario_subfolders = '/res2400/maxlag10000000nlags15/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
+
+alpha = 0.05 # max acceptable type I error rate for the Kleijnen test
 
 temperature_ds_name = 'itrace' # 1) 'itrace' for 20-11 ka BP, or 2) 'krapp' for 0-800ka BP with res 1000 years
 temperature_ds_path = '/media/luluxette/T7_Shield/pdm/iTrace/'
@@ -89,6 +97,8 @@ for res_months,kyr in iters :
         sisal_df = sisal_df.rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'})
         # Remove Babylon cave as it is located at the exact same coordinates as Hollywood cave : pb for the kriging system
         sisal_df  = sisal_df[sisal_df.site_name != 'Babylon cave']
+        # Remove DevilsHole cave as it seems to be wrongly estimated by itrace, leading to very high residuals at cross validation
+        # sisal_df  = sisal_df[sisal_df.site_name != 'Devils Hole']
 
     # 2. Reload itrace whenever the time slice changes -- bc separate files --
     if (tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months): 
@@ -115,15 +125,16 @@ for res_months,kyr in iters :
     tmp_kyr = kyr
     tmp_res = res_months
 
-    # 4. Load the variogram model and params
-    with open(vario_path, 'r') as f:
-        variogram_dict = json.load(f)
-    variogram_model = variogram_dict['model_name'] 
-    variogram_parameters = {
-        "sill": variogram_dict['sill'], 
-        "range": variogram_dict['range'],  
-        "nugget": variogram_dict['nugget']
-    }
+    # 4. Load the variogram model and params # uncomment if using an aggregated variogram whose path is vario_path
+    if vario_subfolders is None:
+        with open(vario_path, 'r') as f:
+            variogram_dict = json.load(f)
+        variogram_model = variogram_dict['model_name'] 
+        variogram_parameters = {
+            "sill": variogram_dict['sill'], 
+            "range": variogram_dict['range'],  
+            "nugget": variogram_dict['nugget']
+        }
     # =======================================================================================================
     # At this step, we have the external drift df and sisal df at the same temporal resolution and time slice.
     # We can now loop on each of the time steps within the slice to perform kriging.
@@ -132,11 +143,22 @@ for res_months,kyr in iters :
     for t_months, itrace_slice in tqdm(itrace_data.groupby("time",observed=True)): 
         
         yrBP_time = utils.get_yrBP_from_itrace_time(t_months,start_year=int(kyr)*1000) #type:ignore
-        print(yrBP_time)
         # OUTPUT FOLDER
         fp_output_yrBP = f"{fp_output}plots_and_metrics/{str(int(yrBP_time))}yrBP/" #type:ignore
         if not os.path.exists(fp_output_yrBP):
             os.makedirs(fp_output_yrBP)
+
+        # LOAD VARIOGRAM PARAMS IF NOT DONE BEFORE :
+        if vario_subfolders is not None :
+            vario_fp = f"{vario_path}sim{kyr}kyrBP{vario_subfolders}variogram_params_None_t{int(t_months)}.json" #type:ignore
+            with open(vario_fp, 'r') as f:
+                variogram_dict = json.load(f)
+            variogram_model = variogram_dict['model_name'] 
+            variogram_parameters = {
+                "sill": variogram_dict['sill'], 
+                "range": variogram_dict['range'],  
+                "nugget": variogram_dict['nugget']
+            }
 
         # EXTRACT THE RIGHT TIME SCLICES
         external_drift_df = itrace_slice.dropna() 
@@ -210,7 +232,7 @@ for res_months,kyr in iters :
         cv_df =  pd.concat(cvresults_list).reset_index(drop=False) # so site_name re-appears as a column instead of index
         
         # LOO METRICS COMPUTATION 
-        gutils.cv_metrics_and_plots(cv_df,fp_output_yrBP)
+        gutils.cv_metrics_and_plots(cv_df,fp_output_yrBP,alpha=alpha)
 
 # Aggregate results and save them 
 df = pd.concat(df_list).reset_index(drop=True)
