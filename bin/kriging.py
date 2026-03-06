@@ -13,19 +13,23 @@ sns.set_style('dark')
 # Define the experimental setup
 # ==================================
 
-exp_name  = 'run_2026_02_25/allvario/alpha05/' # name of expermiment 
+exp_name  = 'run_2026_03_05_all_varios/' # name of expermiment 
 
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
+# Caves to exclude (sensitivity analysis...), e.g. remove DevilsHole cave as it seems to be wrongly estimated by itrace, leading to very high residuals at cross validation
+# caves_to_exclude = ['Devils Hole','Pacupahuain cave']
+caves_to_exclude = []
 
-# final results with the aggregated vario :
+# Aggregated vario :
 # vario_path = f'{utils.get_project_root()}/output/variograms/2026-02-24_sisal_vs_itrace/itrace/vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json'
 # vario_subfolders = None
-# or with the vario params at each time step:
+
+# Or all varios :
 vario_path = f'{utils.get_project_root()}/output/variograms/2026-02-24_sisal_vs_itrace/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
 vario_subfolders = '/res2400/maxlag10000000nlags15/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
 
-alpha = 0.05 # max acceptable type I error rate for the Kleijnen test
+alpha = 0.10 # max acceptable type I error rate for the Kleijnen test
 
 temperature_ds_name = 'itrace' # 1) 'itrace' for 20-11 ka BP, or 2) 'krapp' for 0-800ka BP with res 1000 years
 temperature_ds_path = '/media/luluxette/T7_Shield/pdm/iTrace/'
@@ -54,6 +58,7 @@ verbose = False
 iters = itertools.product(res_months_list,sims.keys())
 tmp_kyr = None
 tmp_res = None
+df_list = []
 
 for res_months,kyr in iters :
     print('====================================================================================================')
@@ -97,8 +102,9 @@ for res_months,kyr in iters :
         sisal_df = sisal_df.rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'})
         # Remove Babylon cave as it is located at the exact same coordinates as Hollywood cave : pb for the kriging system
         sisal_df  = sisal_df[sisal_df.site_name != 'Babylon cave']
-        # Remove DevilsHole cave as it seems to be wrongly estimated by itrace, leading to very high residuals at cross validation
-        # sisal_df  = sisal_df[sisal_df.site_name != 'Devils Hole']
+        # remove other caves as specified in parameters
+        sisal_df  = sisal_df[~sisal_df.site_name.isin(caves_to_exclude)]
+
 
     # 2. Reload itrace whenever the time slice changes -- bc separate files --
     if (tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months): 
@@ -139,7 +145,6 @@ for res_months,kyr in iters :
     # At this step, we have the external drift df and sisal df at the same temporal resolution and time slice.
     # We can now loop on each of the time steps within the slice to perform kriging.
     # ========================================================================================================
-    df_list=[]
     for t_months, itrace_slice in tqdm(itrace_data.groupby("time",observed=True)): 
         
         yrBP_time = utils.get_yrBP_from_itrace_time(t_months,start_year=int(kyr)*1000) #type:ignore
@@ -212,6 +217,22 @@ for res_months,kyr in iters :
         plt.tight_layout()
         plt.savefig(f'{fp_output_yrBP}map_masked_predictions.png',dpi=500)   
         plt.close('all')
+
+        # fig,axes = putils.plot_ked_platecarree_points(
+        #     df_pred = df_pred[df_pred.lat.between(-55,70)],
+        #     df_obs = data_to_krige[data_to_krige.lat.between(-55,70)],               
+        #     value_col = 'd18Op',
+        #     cmap = 'plasma',
+        #     vmin=-33.063114166259766,
+        #     vmax= -1.4799237251281738,
+        #     s_pred = 80,
+        #     figsize = (18,4),
+        #     adjust_extent = False
+        # )
+        # plt.tight_layout()
+
+        # plt.savefig(f'{fp_output_yrBP}map_latS55N70_predictions.png',dpi=500)   
+        # plt.close('all')
 
         # CROSS-VALIDATION LOOP 
         if verbose: print('cross-validation...')
