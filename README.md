@@ -33,10 +33,10 @@ geostat-isoscapes/
 │   └── variogram_parameters_scan.py  # Iterative variogram computations
 ├── data/                         # Data files
 │   ├── iTrace_simulations_dict.json  # iTrace simulation metadata
-│   ├── elevation/               # Elevation/topography data (ETOPO)
+│   ├── elevation/               # Elevation/topography data (ETOPO) (file to download)
 │   ├── modern/                  # Modern climate data 
-│   ├── temperature/             # Temperature dataset (Krapp)
-│   ├── shapefiles/              # Geographic boundaries and coastlines
+│   ├── temperature/             # Temperature dataset to download (Krapp)
+│   ├── shapefiles/              # Geographic boundaries and coastlines (files to download)
 │   └── sisalv3_csv/             # SISAL database CSV files
 ├── notebooks/                   # Jupyter notebooks for exploration & analysis
 │   ├── sisal_data_exploration.ipynb
@@ -52,10 +52,9 @@ geostat-isoscapes/
 │   ├── variogram_models.py     # Custom variogram models
 │   └── utils.py                # General utilities
 ├── output/                      # Generated outputs
-│   ├── variograms/             # Variogram analysis results
 │   ├── kriging/                # Kriging interpolation results
 │   ├── results_figs/           # Figures and visualizations
-│   └── data_exploration/       # Data exploration outputs
+|   ├── interdistances/         # Graph of SISAL sites separated by between 4000 and 6000km.
 └── pyproject.toml              # Project configuration
 ```
 
