@@ -50,7 +50,7 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
         float(valid.lat.max())
     ], crs=ccrs.PlateCarree()) 
     # title with the year and the month
-    ax.set_title(f"{title} - {time}")
+    ax.set_title(f"{title} {time}")
     return fig, ax
 
 def plot_isoscape_latlon_platecarree_df(
@@ -63,9 +63,11 @@ def plot_isoscape_latlon_platecarree_df(
         qty_col :str = 'd18Op',
         save_fp : str|None = None,
         s = 20,
-        unit='‰',
+        unit : str|None = '‰',
         cmap='viridis',
         cmap_sym0 = False,
+        v_min : float|None = None,
+        v_max : float|None = None,
         qty_label : str| None = None,
         figsize=(10,5),
         adjust_extent=True
@@ -83,12 +85,19 @@ def plot_isoscape_latlon_platecarree_df(
     if cmap_sym0 :
         v_min = min(df[qty_col].min(),-df[qty_col].max())
         v_max = max(df[qty_col].max(),-df[qty_col].min())
-    else :
-        v_min,v_max = None,None
 
     fig, ax = plt.subplots(figsize=figsize,
                            subplot_kw={"projection": ccrs.PlateCarree()})
 
+    if countries_borders:
+        ax.add_feature(cfeature.BORDERS, linewidth=0.2)#type:ignore
+    # ax.coastlines() # type:ignore
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.2) #type:ignore
+    ax.add_feature(cfeature.LAND, facecolor="#d8d8d8", edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.OCEAN, facecolor="#dff4fd", edgecolor="none")#type:ignore
+    ax.set_axis_off()
+    # gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray', alpha=0.5, linestyle='--')#type:ignore
+    # gl.right_labels = gl.top_labels = False
     # Scatter plot of irregular points
     sc = ax.scatter(
         df[lon_col],
@@ -97,10 +106,12 @@ def plot_isoscape_latlon_platecarree_df(
         cmap=cmap,
         transform=ccrs.PlateCarree(),
         s=s,
-        edgecolor="none",
-        alpha=0.9,
+        edgecolor=None,#"#404040",
+        linewidths=0.3,
+        alpha=0.99,
         vmin=v_min,
-        vmax = v_max
+        vmax = v_max,
+        marker='s'
     )
 
     # cbar = plt.colorbar(sc, ax=ax, label=qty_col)
@@ -109,17 +120,15 @@ def plot_isoscape_latlon_platecarree_df(
     divider = make_axes_locatable(ax)
     cax= divider.append_axes("right", size="4%", pad=0.05,axes_class=Axes)
     cbar = fig.colorbar(sc, cax=cax)
-    cbar.set_label(qty_label+f' [{unit}]')
+    cbar.outline.set_visible(False) # type: ignore
+    if unit is not None :   
+        unit = f' [{unit}]'
+    else :
+        unit = ''
+    cbar.set_label(qty_label+unit)
 
-    if countries_borders:
-        ax.add_feature(cfeature.BORDERS, linewidth=0.2)#type:ignore
-    # ax.coastlines() # type:ignore
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.2) #type:ignore
-    ax.add_feature(cfeature.LAND, facecolor="#969595", edgecolor="none")#type:ignore
-    ax.add_feature(cfeature.OCEAN, facecolor="#e0f5fc", edgecolor="none")#type:ignore
-    
     valid = df.dropna(subset=[lat_col, lon_col, qty_col])
-    eps = 5
+    eps = 3
     if adjust_extent :
         ax.set_extent([    #type:ignore
             valid[lon_col].min()-eps,
@@ -454,7 +463,7 @@ def plot_platecarree_field_and_scatter_on_top(field_df,
                                               figsize=(10,6),
                                               markersize=30,
                                               ):
-    """ TODO: This function plots a field overlays a scatter plot on top of it. Designed for checking the values of a qty (qty_points) at some locs of the field.
+    """ This function plots a field overlays a scatter plot on top of it. Designed for checking the values of a qty (qty_points) at some locs of the field.
     """
     # Normalization range
     norm = Normalize(vmin=vmin, vmax=vmax)
@@ -533,12 +542,12 @@ def plot_ked_platecarree_points(df_pred,
     for ax in axes:
         if adjust_extent :
             ax.set_extent([df_pred[lon].min(), df_pred[lon].max(), df_pred[lat].min(), df_pred[lat].max()], crs=ccrs.PlateCarree())#[lon_min - pad_lon, lon_max + pad_lon,lat_min - pad_lat, lat_max + pad_lat], crs=ccrs.PlateCarree())
-        ax.add_feature(cfeature.COASTLINE, linewidth=0.6)
-        ax.add_feature(cfeature.BORDERS, linewidth=0.4)
-        ax.add_feature(cfeature.LAND, facecolor="#f0f0f0", edgecolor="none")
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.2)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.2)
+        ax.add_feature(cfeature.LAND, facecolor="#d8d8d8", edgecolor="none")
         ax.add_feature(cfeature.OCEAN, facecolor="#dff4fd", edgecolor="none")
-        gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray', alpha=0.5, linestyle='--')
-        gl.right_labels = gl.top_labels = False
+        # gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray', alpha=0.5, linestyle='--')
+        # gl.right_labels = gl.top_labels = False
 
     sc1 = axes[0].scatter(df_pred[lon],
                           df_pred[lat],
@@ -552,8 +561,8 @@ def plot_ked_platecarree_points(df_pred,
     divider = make_axes_locatable(axes[0])
     cax1 = divider.append_axes("right", size="4%", pad=0.05,axes_class=Axes)
     cbar1 = fig.colorbar(sc1, cax=cax1)
-    cbar1.set_label(r"$\delta^{18}\text{O}_p$ [‰]")
-    axes[0].set_title("Kriging Prediction")
+    cbar1.set_label(r"$\delta^{18}\text{O}_p$ [‰]", fontsize=20)
+    # axes[0].set_title("Kriging Prediction", fontsize=16)
 
     sc2 = axes[1].scatter(df_pred[lon],
                           df_pred[lat],
@@ -563,11 +572,11 @@ def plot_ked_platecarree_points(df_pred,
     divider = make_axes_locatable(axes[1])
     cax2 = divider.append_axes("right", size="4%", pad=0.05, axes_class=Axes)
     cbar2 = fig.colorbar(sc2, cax=cax2)
-    cbar2.set_label("Kriging Variance [‰²]")
-    axes[1].set_title("Kriging Variance")
+    cbar2.set_label(r"$\sigma_\text{KED}$ [‰$^2$]", fontsize=20)
+    # axes[1].set_title("Kriging Variance", fontsize=16)
 
     if title is not None: 
-        fig.suptitle(title, fontsize=15,y=0.94)
+        fig.suptitle(title, fontsize=18,y=0.94)
     return fig,ax
 
 
