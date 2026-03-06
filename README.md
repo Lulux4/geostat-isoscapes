@@ -4,7 +4,7 @@ This repository contains a master's thesis project for reconstructing $\delta^{1
 
 The kriged isoscapes generated are available in file  
 ```
-output/kriged_isoscape/
+output/kriging/speleothems_isoscapes_11_to_20kaBP.nc
 ```
 
 ## Overview of the data and methods used in this project
