@@ -267,7 +267,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                 fp=fp_itrace,
                                                 config_dict=itrace_params,
                                                 data_cols=data_cols,
-                                                mask_pts = sisal_df_valid if mask_itrace_around_sisal_pts else None, # type:ignore # TODO : sisal_df_valid or region? depends on the needs, be careful
+                                                mask_pts = sisal_df_valid if mask_itrace_around_sisal_pts else None, # type:ignore
                                                 verbose = verbose,
                                                 save_all=save_all
                                             )

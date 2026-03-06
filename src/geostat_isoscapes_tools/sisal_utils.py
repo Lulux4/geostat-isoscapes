@@ -422,8 +422,6 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_x
     ''' 1) retrieves temperature of data_df samples based on the temp_xda datarray provided (interpolation with specified method + NN as backup) 
         2) convert speleothem PDB d18O into precipitation VSMOW d18O using Tremaine equation.
         Be careful : the convention for the dates should be the same for both data_df and temp_xda (for instance, time dim can be years before present, so that 12 means 12 years BP.)
-    Inputs :  TODO
-    Outputs : TODO
     '''
     if verbose : print("-> converting speleothem data")
     # 1. Temperature retrieval 
@@ -451,7 +449,7 @@ def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_x
     return converted_data
 
 def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame,lat_col :str ='latitude',lon_col :str ='longitude') -> pd.DataFrame :
-    ''' TODO : explain this rough def of continents
+    ''' Rough definition of continents with "rectangles"
     '''
     df = df_orig.copy()
     # Define regions

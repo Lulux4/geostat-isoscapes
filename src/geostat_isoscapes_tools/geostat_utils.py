@@ -219,14 +219,15 @@ def fit_multiple_linear_model(exog, y,predictors):
     return result_dict
 
 def multiple_linear_result_dict_to_df(result_dict):
-    """ TODO
-    for printing results (df is printed more nicely than a dict)
+    """ This function transcribes a dictionary of trend removal metrics to a dataframe (df is printed more nicely than a dict)
     """
+    # make sure the order of the parameters is the same in the 3 dicts
+    ordered_names = list(result_dict['parameters'].keys())
     res_df = pd.DataFrame({
-                    "name": result_dict['parameters_std'].keys(),
-                    "beta": result_dict["parameters"].values(),
-                    "std_error": result_dict["parameters_std"].values(),
-                    "p_value": result_dict["p"].values(),
+                    "name": ordered_names,
+                    "beta": [result_dict["parameters"][name] for name in ordered_names],
+                    "std_error": [result_dict["parameters_std"][name] for name in ordered_names],
+                    "p_value": [result_dict["p"][name] for name in ordered_names],
                 })
     
     if len(result_dict['parameters'])>2:
@@ -335,7 +336,30 @@ def variogram_with_gstat(df : pd.DataFrame,
                          save_interdistances_graphs : str| None = None,
                          bin_func ='even') :
     """Compute experimental variogram with sampling.
-    TODO : write this fct doc 
+    Inputs : 
+        - df : pd.DataFrame, containing x and y columns corresponfing to coordinates in a planar projection, and the data on which to compute the variogram
+        - quantity : str = 'd18Op', name of the variable on whoch to compute the variogram
+        - sample_size : int =3000, upper limit for the number of datapoints available to compute the variogram (avoid heavy computations). 
+                        If this limit is reached, N locations are picked at random among all locations provided,
+        - direction : float | None = None : defines whether to compute a directional variogram or not 
+        - trend: str|None = None, name of the trend model to use for removing trends in the data before the variogram computation.
+        - nlags : int = 30, number of lag classes  
+        - maxlag : float | str | None = 'median', maximum value of the lag 
+        - centers : np.ndarray | None = None, centers of the lag classes 
+        - model : str ='spherical', model to fit to the empirical variogram 
+        - return_Variogram_object : bool = False, whether to return the variogram object or not
+        - seed : int = 42, random seed used in the random sampling described before 
+        - verbose : bool = True, indicates the level of verbosity
+        - tolerance = 22.5, angular tolerance for binning pairs of data in the directional variograms
+        - x= 'x', name of the column containing the first coordinate of the points
+        - y= 'y', name of the col. containing the second coordinate of the points
+        - plot_interdistances_graph : bool = False, whether to plot the graphs of interdistances falling in each lag class
+        - save_interdistances_graphs : str| None = None, the path for saving the interdistances graphs
+        - bin_func ='even' : type of binning function to use to make lag classes (uniform or even...)
+    Outputs :
+        - either the variogram object V of gstat
+        - or its attributes V.bins (bin edges), V.experimental (emprical semivariances), V.bin_count (number of pairs in each bin),V.fitted_model (function of the fitted model), and the trend_results
+
     """
     # check if the month contains too much samples. If so, sample it down to the sample_size.
     if len(df) > sample_size:
@@ -500,8 +524,6 @@ def get_gstatvario_params_dict(parameters):
 
 # ========= deprecated : iterative vario looping on df grouped by time. See below for new version 
 # def iterative_variogram_computations_df(df,ref_bins = None,direction=None,trend='plane',verbose=False):
-#     """ TODO 
-#     """
 #     df['x'], df['y'] = project_coords(df['lon'].values, df['lat'].values, epsg="EPSG:3857")
 #     print('-> initializing loop...')
 #     bin_counts, gammas = [], []
@@ -702,7 +724,10 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
     return bin_counts, gammas, ref_bins, trend_results
 
 def aggregate_variograms(bin_counts,gammas,bins):
-    """ TODO 
+    """ This function aggregates empirical variograms by taking the weighted mean of the semivariances (argument gamma, arraylike) for each lag class (bins, arraylike), 
+    > For a given lag class, the weights attributed to the different semivariance values coming from the varios to aggregate
+    > are proportional to the number of pairs in this lag class for each variogram instance (bin_counts, 2D arraylike).
+    The output is the dataframe containing the averaged semivariances, lags and total number of pairs in the lag classes. 
     """
     if bin_counts == []:
         return None
@@ -725,7 +750,16 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                                      data_cols : dict = {'lat':'lat','lon':'lon','quantity':'d18Op'},
                                      verbose : bool = False,
                                      save_all : bool = False):
-    """ TODO """
+    """ This functions performs iterative variogram computations and aggregate the resulting semivariances.
+    Inputs : 
+        - data : xarray of pandas object containing the data on which to compute the variograms. Dimensions shoudl be time, lat and lon
+        - fp : the file path to which to save the different outputs that will be generated during the computations
+        - config_dict : dictionary of the variogram configuration : maxlag,nbins,model,trend,bin_func,direction,tolerance, trend_before_mask..
+        - datacols : the name of the main variable (on which to compute the variogram), longitude and latitude columns
+        - verbose : defines the level of verbosity of the process
+        - save_all : whether to save all variograms or just the aggregated one
+    Output : saves the variogram(s) at the desired path.
+    """
     # if a mask must be applied, define it here
     mask_df = None
     if mask_pts is not None :
@@ -959,10 +993,22 @@ def get_preprocessed_itrace_data(res=None,
                             P : bool = False,
                             format : str = 'df',
                             verbose : bool = True) :
-    """ TODO 
-    res : in ***MONTHS***
-    format : df or xr
-    P = precip quantity
+    """ This function loads the iTraCE output file corresponding to the specification provisded in arguments.
+    Inputs : 
+        - res : temporal resolution in ***MONTHS***
+        - format of the output the function : df or xr
+        - P : whether to load precip amount as well
+        - data_folder : path to the itrace folder on your computer
+        - sim_prefix : prefix of the simulation file
+        - sim_kyr : name of the 1000-year slice of the siumulation output
+        - sim_forcings : the name of the forcings of the simulation
+        - sim_model : name of the climate model 
+        - sim_suffix : suffix of the simulation output file
+        - include_snow : whether to include Snow precipitation in the computations
+        - regions : list of tuples of type (str, list[str]) for instance : ('continents',['Europe','North America'])...
+        - buffer_km : number of km to keep after the regions borders
+    Output : 
+        - the pandas dataframe or xr dataset of itrace simulation. If P is also selected, it returns also the data of P, separately.
     """
     if verbose : print('loading itrace files')
     # files to find and read :
@@ -1125,14 +1171,28 @@ def ked(df_to_krige : pd.DataFrame,
                 lat:pred_latlon[lat],
                 'z_pred':z_pred,
                 'ss_pred':ss_pred})
-    # if cv mask was provided, also include the obs values at the pred locations
+    # if cv mask was provided, also include the obs values at the pred locations and the drift values at the pred locations
     if isinstance(cv_mask,np.ndarray):
         df_pred['z_obs']=df_validation[qty].values
+        df_pred['drift_at_obs']=drift_at_obs_val
     return df_pred
 
 def compute_ked_metrics_dict(cv_df,alpha=0.10):
-    ''' TODO :
-    alpha = max Type 1 error rate
+    ''' This function computes different metrics applicable to the cross-validation of KED interpolation.
+    Metrics : - distance to the nearest site 
+              - ME : mean error
+              - RMSE : root mean squared error
+              - MAE : mean absolute error
+              - logbias : logarithm of the ratio of the obs to the pred
+              - R_obs_pred : Pearson correlation coefficient between obs and pred
+              - R_pred_res : Pearson correlation coefficient between ored and residuals
+              - mean CRPS score : mean Continuous Rank Probability Score of the predictions
+
+    Input :
+        - cv_df : dataframe containing the predicted values z_pred, observed values z_obs, kriging variance ss_pred, latitude lat and longitude lon of the cross-validation sites.
+        - alpha = max Type 1 error rate
+    Returns :
+        - dict of the metrics values
     '''
     metrics_dict = {}
     # COMPUTE DISTANCE TO NN
@@ -1172,7 +1232,7 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str,alpha=0.10):
 
     putils.plot_scatter_with_ci(cv_df,alpha,fp=f'{fp}PES_scatterplot.png')
 
-    # save cross val df and metrics
+    # save cross val df and metrics in case i want to compute more metrics
     cv_df.to_csv(f'{fp}crossval_df.csv')
     with open(f'{fp}crossval_metrics.json','w') as file :
         json.dump(metrics_dict,file)
@@ -1221,9 +1281,8 @@ def add_external_variables_to_lonlat_df(df_orig : pd.DataFrame,
     return df
 
 def interpolate_dem_at_latlon_points(df_latlon: pd.DataFrame, dem_file :str ="/data/elevation/ETOPO_2022_v1_60s_N90W180_surface.nc",lat='lat',lon='lon'):
-    """ TODO 
-    lat : -90 to 90
-    lon : -180 to 180
+    """ Interpolates the DEM model at provided latitude/longitude points, using linear interpolation.
+    The DEM file should be openable with xarray.opendataset with the engine netcdf4.  
     """
     df = df_latlon.copy()
     if any(df[lon]>180):

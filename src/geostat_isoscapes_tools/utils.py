@@ -89,7 +89,7 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     return binned_series
 
 def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray : 
-    """ TODO """
+    """ This function bins a xs dataarray time at the specified resolution and applies a median on the dataarray attributes values."""
     tmin, tmax = float(da.time.min()), float(da.time.max())
     bins = np.arange(tmin, tmax + int(res), int(res)) #type:ignore
 
@@ -207,7 +207,7 @@ def haversine(u, v):
     return 2 * 6371 * np.arcsin(np.sqrt(a)) # since earth radius = approx 6371 km
 
 def dist_to_nn_on_sphere(points):
-    ''' TODO : to test and write description'''
+    ''' This function computes the distance of each location in the array _points_ to its nearest neighbourg, using coordinates on a sphere'''
     coords_radians = np.deg2rad(points[["lat","lon"]].values)
     tree = BallTree(coords_radians,metric='haversine')
     dists,inds = tree.query(coords_radians,k=2)
@@ -397,7 +397,8 @@ def get_itrace_temperature_dataset(
         buffer_km : float = 50,
         format : str = 'df',
         verbose : bool = True) :
-    """ TODO 
+    """ Loads the temperature data of iTraCE simulations from the specified arguments leading to the temporature output file.
+    See the documentation on get_preprocessed_itrace function for more details. 
     res : in ***MONTHS***
     format : df or xr
     """
