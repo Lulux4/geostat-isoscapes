@@ -1,6 +1,10 @@
 data/tests/
 data/elevation/
-output/
+output/data_exploration/
+output/ked_firsttests/
+output/perso/
+output/variograms/
+output/kriging/
 src/geostat_isoscapes_tools.egg-info
 src/geostat_isoscapes_tools/__pycache__
 data/temperature/temp_800ka_ann.nc
