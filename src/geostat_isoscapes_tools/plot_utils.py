@@ -205,7 +205,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
             nrows=1,
             ncols=2,
             width_ratios=[3.2, 1.2],
-            wspace=0.1
+            wspace=0.3
         )
         ax = fig.add_subplot(gs[0, 0])
         ax_info = fig.add_subplot(gs[0, 1])
@@ -239,24 +239,57 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
         # retrieve the fit parameters for drawing associated lines and legend
         sill,range_,nugget= None,None,None
         if model_params is not None :
-            if not ('+' in model_name):
-                range_ = model_params['range']
-                nugget =model_params['nugget']
-                sill = model_params['sill']+nugget
+            n_models = len(model_name.split('+'))
+            if n_models ==1 :
+                if model_name != 'nugget' :
+                    range_ = model_params[f'range_{model_name}']
+                    sill = model_params[f'sill_{model_name}']
+                    ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label="Range")
+                    ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Sill")
+                if model_name == 'nugget' :
+                    nugget = model_params['nugget']
+                    ax.axhline(nugget,color=colors[4],linestyle='--',alpha=0.3,label="Nugget")
+            elif n_models ==2 and model_name.count('nugget')==1:
+                # Get the name of the non-nugget model
+                non_nugget_model = [m for m in model_name.split('+') if m != 'nugget'][0]
+                range_ = model_params[f'range_{non_nugget_model}']
+                sill = model_params[f'sill_{non_nugget_model}']+model_params['nugget']
                 ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label="Range")
-                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Total sill")
+                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Sill")
+                nugget = model_params['nugget']
             else:
                 range_ = gutils.effective_range(bin_edges,model_fct,0.95)
-                nugget= model_params['nugget']
-                sill = model_params['sill1']+model_params['sill2']+nugget
+                nugget=0.0
+                sill=0.0
+                if 'nugget' in model_name:
+                    nugget = model_params['nugget']
+                prev_models=[] # handle the case of nested models of the same type like spherical+spherical
+                for model in model_name.split('+'):
+                    if model!='nugget':
+                        if model in prev_models:
+                            k = prev_models.count(model)+1 # because i put a number in the params if there are multiple models
+                            sill += model_params[f'sill_{model}_{k}']
+                        else :
+                            sill += model_params[f'sill_{model}']
+                            prev_models.append(model)
+                    else : 
+                        sill += nugget
                 ax.axvline(range_,color=colors[2],linestyle='--',alpha=0.3,label='Effective range')
-                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Total sill")
-        if (ax_info is not None) & (range_ is not None) & (sill is not None) & (nugget is not None):
+                ax.axhline(sill,color=colors[3],linestyle='--',alpha=0.3,label="Total sill (+nugget)")
+        if (ax_info is not None):
             weights = None
             if counts is not None : 
                 weights = gutils.get_weights_from_pair_counts(counts)
             r2 = utils.r2(gamma, model_fct(bin_edges), weights=weights)
-            textstr = rf"$\bf{{Range:}}$ {range_:.2e}m""\n"rf"$\bf{{Total~sill:}}$ {sill:.2f}‰$^2$""\n"rf"$\bf{{Nugget:}}$ {nugget:.2f}‰$^2$""\n"rf"$\bf{{R^2:}}$ {r2:.2f}"
+            textstr=''
+            if range_ is not None :
+                textstr += rf"$\bf{{Range:}}$ {range_:.2e}m""\n"
+            if sill is not None :
+                textstr += rf"$\bf{{Total~sill:}}$ {sill:.2f}‰$^2$""\n"
+            if nugget is not None :
+                textstr += rf"$\bf{{Nugget:}}$ {nugget:.2f}‰$^2$""\n"
+            if r2 is not None :
+                textstr += rf"$\bf{{R^2:}}$ {r2:.2f}"
     # Compute widths :
     widths = np.diff(bin_edges)
     widths = np.r_[bin_edges[0],widths]

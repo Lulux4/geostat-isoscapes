@@ -865,17 +865,48 @@ def fit_variogram_model(bin_edges, gammas, model_name='spherical', initial_param
 
     model = variogram_models.define_model(model_name)
     func = model.get_model_func()
-    param_names = model.params
 
     if initial_params is None:
         sill_guess = np.nanmax(gammas)
         range_guess = np.nanmax(bins) / 3
+        n_models = model_name.count('+') + 1
+        
+        if n_models>3 : raise NotImplementedError('initial params guess not implemented for more than 3 combined models')
+        
+        # we define the initial guesses components
+        # range_guess = range_guess
+        sill_guess = sill_guess / n_models
         nugget_guess = gammas[0]
-        if '+' in model_name:
-            initial_params = [nugget_guess,range_guess, sill_guess/2,range_guess*2, sill_guess/2]
-        else:
-            initial_params = [range_guess,sill_guess, nugget_guess]
-
+        
+        # For each model, we add the intiial guess that is corresponding to this model in an array:
+        model_name_split = model_name.split('+')
+        initial_params=[]
+        initial_params_names = []
+        for model_name_ in model_name_split:
+            if model_name_ == 'spherical' :  
+                initial_params.append(range_guess)
+                initial_params.append(sill_guess)
+                initial_params_names.extend(['range_spherical', 'sill_spherical'])
+            if model_name_ == 'exponential' :
+                initial_params.append(range_guess)
+                initial_params.append(sill_guess)
+                initial_params_names.extend(['range_exponential', 'sill_exponential'])
+            if model_name_ == 'gaussian' :
+                initial_params.append(range_guess)
+                initial_params.append(sill_guess)
+                initial_params_names.extend(['range_gaussian', 'sill_gaussian'])
+        # initial params are of the type [range,sill,range,sill,...]  
+        
+        # if ('+spherical' in model_name)|('+exponential' in model_name)|('+gaussian' in model_name):
+        #     initial_params = [range_guess, sill_guess/2,range_guess*2, sill_guess/2]
+        # else:
+        #     initial_params = [range_guess,sill_guess]
+        if model_name.count('nugget')>1: raise ValueError('Nugget effect cannot be counted more than once in the model name!')
+        if 'nugget' in model_name:
+            initial_params.append(nugget_guess)
+            initial_params_names.append('nugget')
+        # Now the initial params are, at max, [range,sill,range,sill,nugget]
+    
     # define weights for the fitting. Curve fit mimimizes (residuals/sigma)^2, so we need the less reliable bins to have a large sigma
     if weighting is not None :
         if weighting == 'lags':
@@ -885,14 +916,18 @@ def fit_variogram_model(bin_edges, gammas, model_name='spherical', initial_param
         sigma = vals_to_weight**weights_power # increases the power of the weighting.
     else :
         sigma = None
-    try : 
+    try:
         popt, pcov = curve_fit(func, bins, gammas, p0=initial_params, bounds=bounds or (-np.inf, np.inf), sigma=sigma, absolute_sigma=False)
         fitted_fct = make_fitted_model_func(func,*popt)
-        params = {name: val for name, val in zip(param_names, popt)}
-        params['model_name'] = model_name
+        params = {}
+        for p, val in zip(initial_params_names, popt):
+            if p not in params.keys():
+                params[p]= val
+            else :
+                params[f'{p}_2'] = val
     except Exception as e :
         print(e)
-        params, fitted_fct,pcov = None,None, None
+        params, fitted_fct,pcov =  None, None,None
     return params,fitted_fct,pcov
 
 def make_fitted_model_func(f,*args,**kwargs):
@@ -987,11 +1022,11 @@ def get_preprocessed_itrace_data(res=None,
                             sim_num = '05',
                             sim_model = 'clm2.h0',
                             sim_suffix = '800001-899912',
-                            include_snow = True,
                             regions : tuple[str,list[str]]| None = None,
                             buffer_km : float = 50,
                             P : bool = False,
                             format : str = 'df',
+                            amount_weighted=True,
                             verbose : bool = True) :
     """ This function loads the iTraCE output file corresponding to the specification provisded in arguments.
     Inputs : 
@@ -1004,9 +1039,9 @@ def get_preprocessed_itrace_data(res=None,
         - sim_forcings : the name of the forcings of the simulation
         - sim_model : name of the climate model 
         - sim_suffix : suffix of the simulation output file
-        - include_snow : whether to include Snow precipitation in the computations
         - regions : list of tuples of type (str, list[str]) for instance : ('continents',['Europe','North America'])...
         - buffer_km : number of km to keep after the regions borders
+        - amount_weighted : whether to weight the d18O by the precip amount
     Output : 
         - the pandas dataframe or xr dataset of itrace simulation. If P is also selected, it returns also the data of P, separately.
     """
@@ -1016,25 +1051,21 @@ def get_preprocessed_itrace_data(res=None,
     fn_itrace_RAIN_H218O = f'{fn_merged}.RAIN_H218O.{sim_suffix}.nc'
     fn_itrace_RAIN_H2OTR = f'{fn_merged}.RAIN_H2OTR.{sim_suffix}.nc'
     fn_itrace_RAIN = f'{fn_merged}.RAIN.{sim_suffix}.nc'
-    if include_snow :
-        fn_itrace_SNOW_H218O = f'{fn_merged}.SNOW_H218O.{sim_suffix}.nc'
-        fn_itrace_SNOW_H2OTR = f'{fn_merged}.SNOW_H2OTR.{sim_suffix}.nc'    
-        fn_itrace_SNOW = f'{fn_merged}.SNOW.{sim_suffix}.nc'
+    fn_itrace_SNOW_H218O = f'{fn_merged}.SNOW_H218O.{sim_suffix}.nc'
+    fn_itrace_SNOW_H2OTR = f'{fn_merged}.SNOW_H2OTR.{sim_suffix}.nc'    
+    fn_itrace_SNOW = f'{fn_merged}.SNOW.{sim_suffix}.nc'
 
     # load files 
     file_rH218O = utils.load_xarray_datarray(fn_itrace_RAIN_H218O)
     file_rH2OTR = utils.load_xarray_datarray(fn_itrace_RAIN_H2OTR)
-    if include_snow :
-        file_sH218O = utils.load_xarray_datarray(fn_itrace_SNOW_H218O)
-        file_sH2OTR = utils.load_xarray_datarray(fn_itrace_SNOW_H2OTR)
-    
-    # compute the delta18Op
+    file_sH218O = utils.load_xarray_datarray(fn_itrace_SNOW_H218O)
+    file_sH2OTR = utils.load_xarray_datarray(fn_itrace_SNOW_H2OTR)
+
+    # compute the delta18Op at each time step and each point
     h218o = file_rH218O.RAIN_H218O
     h2o = file_rH2OTR.RAIN_H2OTR
-    if include_snow :
-        h218o += file_sH218O.SNOW_H218O
-        h2o += file_sH2OTR.SNOW_H2OTR
-
+    h218o += file_sH218O.SNOW_H218O
+    h2o += file_sH2OTR.SNOW_H2OTR
     delta18 = ( h218o/h2o - 1.0) * 1000.0
     delta18 = delta18.where( (h2o> 1e-12) & (delta18 < 1e2) )  # avoid div by near-0 precip values and large positive outliers (delta18 should be mostly negative and small -20/+20)
     
@@ -1043,36 +1074,32 @@ def get_preprocessed_itrace_data(res=None,
     timearray = range(0,len(delta18.time),1)
     delta18 = delta18.assign_coords(time=('time',timearray))
     delta18 = delta18.assign_coords(time = delta18.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
-    
-    if res is not None :
-        if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
-        delta18 = utils.bin_xrDataArray_time(delta18,res=res)
 
-    if regions is not None :
-        delta18 = utils.mask_regions_shape(delta18,buffer_km=buffer_km,regions=regions)  
-
-    if P :
-        if verbose : print('  Loading files for total precipitation info')
-        # load netcdf files 
+    if amount_weighted or P :
         file_rain = utils.load_xarray_datarray(fn_itrace_RAIN)
+        file_snow = utils.load_xarray_datarray(fn_itrace_SNOW)
         precip_da = file_rain.RAIN
-        if verbose : print(f'   rain file info : {precip_da.attrs}')
-        if include_snow :
-            file_snow = utils.load_xarray_datarray(fn_itrace_SNOW)
-            precip_da += file_snow.SNOW
-        
+        precip_da += file_snow.SNOW
+
         # set same time unit as delta18
         precip_da = precip_da.assign_coords(time =('time',timearray))
         precip_da = precip_da.assign_coords(time = precip_da.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
-        precip_da = precip_da * 32 * 24 * 3600 # integrate over bin width (natural binwidth is 31 days)
+        precip_da = precip_da * 31 * 24 * 3600 # integrate over bin width (natural binwidth is 31 days)
+    
+    if res is not None :
+        # bin time to the desired resolution (in months)
+        if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
+        delta18 = utils.bin_xrDataArray_time(delta18,res=res,method='weighted_mean' if amount_weighted else 'median',weights=precip_da if amount_weighted else None)
+        if P :
+            # we bin the precip data to the desired resolution 
+            precip_da = utils.bin_xrDataArray_time(precip_da,res=res, method='sum')
 
-        if res is not None :
-            # bin time to match the delta18 resolution
-            precip_da = utils.bin_xrDataArray_time(precip_da,res=res)
-            precip_da = precip_da * res # uniform integration over the bin width
-
-        if regions is not None :
+    if regions is not None :
+        delta18 = utils.mask_regions_shape(delta18,buffer_km=buffer_km,regions=regions)  
+        if P :
             precip_da = utils.mask_regions_shape(precip_da,buffer_km=buffer_km,regions=regions) 
+    
+    if P :            
         d18_P_ds = xr.Dataset({'d18Op':delta18, 'P': precip_da})
     
     # outputs differ depending on bools P_da, delta18_da... Return df of xrdataarrays.

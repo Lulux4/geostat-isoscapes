@@ -13,14 +13,14 @@ sns.set_style('dark')
 # CONFIGURATION
 # ==========================================================================================
 # NAME OF EXPERIMENT
-exp_name = '2026-02-24_sisal_vs_itrace'
+exp_name = '2026-04-10_debug'
 
 # DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
-sisal = True
+sisal = False
 itrace = True
 
 # PARAMETERS LISTS :
-mask_itrace_around_sisal_pts = True # variography on itrace masked at sisal points?
+mask_itrace_around_sisal_pts = False # variography on itrace masked at sisal points?
 mask_radius = 2000
 
 trends = [
@@ -54,21 +54,21 @@ trends = [
 azimuths = [None] # 0,45,90,180] # 0 45 90 180 # for directional variograms
 
 # how to access itrace data ? Need the datafolder (not provided in my repo, seee intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
-itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
+itrace_folder = '/home/luluxette/Documents/master-thesis/geostat-isoscapes/data/iTraCE/'#"/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
 with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
     itrace_sims = json.load(f)
 
 # keep only the simulations of interest (each key represent a 1000 yr slice)
 sims = dict((k,itrace_sims[k]) for k in (
     '12',
-    '13',
-    '14',
-    '15',
-    '16',
-    '17',
-    '18',
-    '19',
-    '20'
+    # '13',
+    # '14',
+    # '15',
+    # '16',
+    # '17',
+    # '18',
+    # '19',
+    # '20'
     ) if k in itrace_sims)
 
 # If not computing on itrace, define instead a dummy key for accessing a sisal slice or all times
@@ -89,42 +89,27 @@ regions_list = [
 buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb with antimeridional line
 
 # Variography parameters
-model_name = 'spherical'
+model_name = 'spherical+nugget'
 maxlag = 10e6
 nlags = 10
 bin_func = 'even'
 weighting = 'lags'
 weights_power = 0.5
 
-if not ('+' in model_name) : # bounds for a simple model (spherical, gaussian, exp)
-    model_bounds = (
-        np.array([
-            0.0,   # min range
-            0.0,   # min sill
-            0.2]), # min nugget  : here you can force the model to have non-zero nugget
-        np.array([
-            maxlag,# max range 
-            50,    # max sill
-            10     # max nugget
-        ])
-    )  # max nugget 
-else :
-    model_bounds = ( # bounds for composite model (two models, 5 parameters)
-        np.array([
-            1.0,   # min nugget
-            0.0,   # min range1
-            0.0,   # min sill1
-            0.0,   # min range2
-            0.0,   # min sill2
-        ]),
-        np.array([
-            10,    # max nugget
-            maxlag,# max range1
-            50,    # max sill1
-            maxlag,# max range2
-            50     # max sill2
-        ])
-    )
+# set vario model params bounds for the optimization 
+# the should be in the order or range_1stmodel,sill_1stmodel,range_2ndmodel,sill_2ndmodel,...,nugget
+model_bounds = (
+    np.array([
+        0.0,   # min range
+        0.0,   # min sill
+        0.2]), # min nugget  : here you can force the model to have non-zero nugget
+    np.array([
+        maxlag,# max range 
+        50,    # max sill
+        10     # max nugget
+    ])
+)  # max nugget 
+
 
 # Naming convention of columns
 data_cols = {'lat':'lat','lon':'lon','quantity':'d18Op'}

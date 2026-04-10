@@ -88,12 +88,25 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     binned_series = pd.cut(series, bins, labels = bins[:-1],right=False)
     return binned_series
 
-def bin_xrDataArray_time(da : xr.DataArray, res) -> xr.DataArray : 
+def bin_xrDataArray_time(da : xr.DataArray, res : int, method : str = 'median', weights : xr.DataArray | None = None) -> xr.DataArray : 
     """ This function bins a xs dataarray time at the specified resolution and applies a median on the dataarray attributes values."""
     tmin, tmax = float(da.time.min()), float(da.time.max())
     bins = np.arange(tmin, tmax + int(res), int(res)) #type:ignore
 
-    da_binned = da.groupby_bins('time', bins=bins).median()
+    if method == 'median':
+        da_binned = da.groupby_bins('time', bins=bins).median()
+    elif method == 'sum':
+        da_binned = da.groupby_bins('time', bins=bins).sum()
+    elif method == 'weighted_mean' :
+        if weights is None :
+            raise ValueError("Weights must be provided for weighted mean method.")
+        # Compute weighted mean using xarray operations: sum(da * weights) / sum(weights)
+        da_weighted = (da * weights).groupby_bins('time', bins=bins).sum()
+        sum_weights = weights.groupby_bins('time', bins=bins).sum()
+        da_binned = da_weighted / sum_weights
+    else:
+        raise ValueError("Invalid method. Choose 'median', 'sum', or 'weighted_mean'.")
+
     da_binned = da_binned.rename({'time_bins': 'time'})
     return da_binned.assign_coords(time=bins[:-1])
 
