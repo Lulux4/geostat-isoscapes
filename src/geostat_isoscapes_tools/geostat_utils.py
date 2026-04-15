@@ -142,6 +142,10 @@ def fit_multiple_linear_model(exog, y,predictors):
     y: 1D array (n,)
     predictors : list of the names of predictors in the same order as the X columns
     """
+    # Ensure data is float64 to avoid type issues with scipy/statsmodels
+    exog = np.asarray(exog, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    
     (n,p) = exog.shape
 
     # add constant intercept
@@ -367,7 +371,7 @@ def variogram_with_gstat(df : pd.DataFrame,
         df = df.sample(sample_size, random_state=seed)
     else: 
         if verbose : print('Computing variogram on a field of',len(df), ' points.')
-    vals = df[quantity].values
+    vals = np.asarray(df[quantity].values,np.float64)
 
     trend_results = None
     if trend is not None: 
@@ -965,48 +969,73 @@ def get_sisal_data_for_kriging(res : int | None = 200,
     # convert data if needed
     if conversion is not None :
         print('converting speleothem data to drip-water equivalents...')
+        # prepare naming dict
+        naming_dict = {'data_lon_col':'lon',
+                       'data_lat_col':'lat',
+                       'data_time_col':'age'}
+
         # load temperature dataset
         if temp_ds_name == 'krapp':
             temp_xda = utils.load_xarray_datarray(utils.get_project_root()+temp_ds_path).temp
             temp_xda = temp_xda.assign_coords(time=('time',- temp_xda.time.values))
             temp_xda = temp_xda.assign_coords(time = temp_xda.time.assign_attrs(units=f"years before present (1950)"))
-            data_df = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',verbose=verbose)
+            naming_dict['temp_data_lon_dim']='lon'
+            naming_dict['temp_data_lat_dim']='lat'
+            naming_dict['temp_data_time_dim']='time'
+            data_df = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df,temp_xda=temp_xda,method='linear',naming_dict=naming_dict,verbose=verbose)
             # remove samples for which the conversion failed (usually due to T retrieval failure)
             data_df = data_df.dropna(subset=conversion)
-        elif temp_ds_name == 'itrace' : 
+        elif temp_ds_name == 'itrace': 
             with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f: # hardcoded but this is a file of the repo
                 itrace_sims = json.load(f)
             # open successively each itrace temperature output and convert the sisal data corresponding to this time slice 
-            data_df['d18Op_VSMOW_exactconv']=np.nan
-            data_df['d18Op_VSMOW_linearized']=np.nan
-            data_df['d18Oc_VSMOW']=np.nan
+            data_df['d18Op_VSMOW_exactconv']=pd.NA
+            data_df['d18Op_VSMOW_linearized']=pd.NA
+            data_df['d18Oc_VSMOW']=pd.NA
+            data_df['T']=pd.NA
+
+            naming_dict['temp_data_lon_dim']='lon'
+            naming_dict['temp_data_lat_dim']='lat'
+            naming_dict['temp_data_time_dim']='time'
 
             for t,t_dict in itrace_sims.items():
                 if t != '_comment':
                     t = int(t)
-                    temp_xda = utils.get_itrace_temperature_dataset(data_folder=temp_ds_path,
-                                                                    sim_forcings=t_dict['forcings'],
-                                                                    sim_kyr=t_dict['yrBPname'],
-                                                                    sim_model='cam.h0',
-                                                                    sim_num=t_dict['num'],
-                                                                    sim_prefix='b.e13.Bi1850C5.f19_g16',
-                                                                    sim_suffix=t_dict['suffix'],
-                                                                    true_kyr=t,
-                                                                    format='xr',
-                                                                    verbose=verbose)
+                    temp_xda = get_preprocessed_itrace_data(
+                        res=1, # we need the temp to be at the sisal resoltion = 1 year.We will bin the samples in larger time bins later. 
+                        T=True,
+                        d18O=False, 
+                        P=False,
+                        data_folder=temp_ds_path,
+                        sim_forcings=t_dict['forcings'],
+                        sim_kyr=t_dict['yrBPname'],
+                        sim_model='cam.h0',
+                        sim_num=t_dict['num'],
+                        sim_prefix='b.e13.Bi1850C5.f19_g16',
+                        sim_suffix=t_dict['suffix'],
+                        true_kyr=t,
+                        format='xr',
+                        verbose=verbose)
+                    
                     mask = data_df.age.between((t-1)*1000,t*1000,inclusive='left')
-                    data_df[mask] = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(data_df=data_df[mask].copy(),temp_xda=temp_xda,method='linear',verbose=verbose) #type:ignore
+                    data_df[mask] = sisal_utils.retrieve_temperature_and_convert_speleothem_d18O(
+                        data_df=data_df[mask].copy(),
+                        temp_xda=temp_xda, #type:ignore
+                        naming_dict=naming_dict,
+                        method='linear',
+                        verbose=verbose)
+            data_df.rename(columns={'T':'T_itrace'},inplace=True)
         else :
             raise NotImplementedError('supported temperature datasets are itrace and Krapp.')
-        
+    
     # Bin years to the desired temporal resolution
     if res is not None :
         data_df['binned_age'] = utils.slice_in_equal_bins(data_df['age'].copy(),res)
-    
+        # now each sample has its age and the label of the bin it belongs to
+
     # remove samples for which the conversion failed (usually due to T retrieval failure)
     data_df = data_df.dropna(subset=conversion)
-
-    data_df = data_df.rename(columns={'latitude':'lat','longitude':'lon'})
+    
     if regions is not None :
         if verbose : print(' > keeping only the regions specified in argument')
         data_df = utils.mask_regions_shape(data_df,buffer_km=buffer_km,regions=regions)
@@ -1016,6 +1045,7 @@ def get_sisal_data_for_kriging(res : int | None = 200,
 
 def get_preprocessed_itrace_data(res=None,
                             data_folder = "/media/luluxette/T7_Shield/pdm/iTrace/",
+                            true_kyr=12,
                             sim_prefix = 'b.e13.Bi1850C5.f19_g16',
                             sim_kyr = 12,
                             sim_forcings = 'ice_ghg_orb_wtr',
@@ -1025,15 +1055,20 @@ def get_preprocessed_itrace_data(res=None,
                             regions : tuple[str,list[str]]| None = None,
                             buffer_km : float = 50,
                             P : bool = False,
+                            d18O : bool = True,
+                            T : bool = False,
                             format : str = 'df',
                             amount_weighted=True,
                             verbose : bool = True) :
     """ This function loads the iTraCE output file corresponding to the specification provisded in arguments.
     Inputs : 
-        - res : temporal resolution in ***MONTHS***
+        - res : temporal resolution in ***YEARS***
         - format of the output the function : df or xr
-        - P : whether to load precip amount as well
-        - data_folder : path to the itrace folder on your computer
+        - d18O : whether to give the d18O as output 
+        - P : whether to give the precip amount as output
+        - T : whether to give the temperature at the surface as output
+        - data_folder : path to the itrace folder on your computer,
+        - true_kyr : the kyr slice of the simulation output to load (it does not correspond necessarily to the kyr specified in sim_kyr, which is the name of the kyr slice in the simulation file, and was wrong for the time slice 19kyr...)
         - sim_prefix : prefix of the simulation file
         - sim_kyr : name of the 1000-year slice of the siumulation output
         - sim_forcings : the name of the forcings of the simulation
@@ -1046,7 +1081,11 @@ def get_preprocessed_itrace_data(res=None,
         - the pandas dataframe or xr dataset of itrace simulation. If P is also selected, it returns also the data of P, separately.
     """
     if verbose : print('loading itrace files')
-    # files to find and read :
+
+    if (not P) and (not d18O) and (not T): raise ValueError('At least one of the three variables d18O, P or T must be selected as output of the function!')
+    if (T & P) or (T & d18O) or (T & d18O & P) : raise NotImplementedError('Temperature cannot be selected together with d18O or P for now, because of the way the files are loaded and preprocessed. This can be implemented in the future if needed.')
+ 
+    # potential files to find and read :
     fn_merged = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
     fn_itrace_RAIN_H218O = f'{fn_merged}.RAIN_H218O.{sim_suffix}.nc'
     fn_itrace_RAIN_H2OTR = f'{fn_merged}.RAIN_H2OTR.{sim_suffix}.nc'
@@ -1054,68 +1093,50 @@ def get_preprocessed_itrace_data(res=None,
     fn_itrace_SNOW_H218O = f'{fn_merged}.SNOW_H218O.{sim_suffix}.nc'
     fn_itrace_SNOW_H2OTR = f'{fn_merged}.SNOW_H2OTR.{sim_suffix}.nc'    
     fn_itrace_SNOW = f'{fn_merged}.SNOW.{sim_suffix}.nc'
+    fn_itrace_TREFHT = f'{fn_merged}.TREFHT.{sim_suffix}.nc' # temperature
 
     # load files 
-    file_rH218O = utils.load_xarray_datarray(fn_itrace_RAIN_H218O)
-    file_rH2OTR = utils.load_xarray_datarray(fn_itrace_RAIN_H2OTR)
-    file_sH218O = utils.load_xarray_datarray(fn_itrace_SNOW_H218O)
-    file_sH2OTR = utils.load_xarray_datarray(fn_itrace_SNOW_H2OTR)
+    if d18O : 
+        delta18 = utils.define_d18O_itrace(fn_itrace_RAIN_H2OTR,fn_itrace_RAIN_H218O,fn_itrace_SNOW_H2OTR,fn_itrace_SNOW_H218O,kyr=true_kyr)
+    if (d18O & amount_weighted) or P : 
+        precip_da = utils.define_precipitation_itrace(fn_itrace_RAIN,fn_itrace_SNOW,kyr=true_kyr)
+    if T : 
+        trefht_da = utils.define_temperature_itrace(fn_itrace_TREFHT,kyr=true_kyr)
 
-    # compute the delta18Op at each time step and each point
-    h218o = file_rH218O.RAIN_H218O
-    h2o = file_rH2OTR.RAIN_H2OTR
-    h218o += file_sH218O.SNOW_H218O
-    h2o += file_sH2OTR.SNOW_H2OTR
-    delta18 = ( h218o/h2o - 1.0) * 1000.0
-    delta18 = delta18.where( (h2o> 1e-12) & (delta18 < 1e2) )  # avoid div by near-0 precip values and large positive outliers (delta18 should be mostly negative and small -20/+20)
-    
-    # The itrace doc specifies explicetely that the temporal resolution is in months, so we can define the time dimension in terms of months after a start year.
-    if verbose : print('This dataset contains ',len(delta18.time), ' time steps.') # just to check
-    timearray = range(0,len(delta18.time),1)
-    delta18 = delta18.assign_coords(time=('time',timearray))
-    delta18 = delta18.assign_coords(time = delta18.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
-
-    if amount_weighted or P :
-        file_rain = utils.load_xarray_datarray(fn_itrace_RAIN)
-        file_snow = utils.load_xarray_datarray(fn_itrace_SNOW)
-        precip_da = file_rain.RAIN
-        precip_da += file_snow.SNOW
-
-        # set same time unit as delta18
-        precip_da = precip_da.assign_coords(time =('time',timearray))
-        precip_da = precip_da.assign_coords(time = precip_da.time.assign_attrs(units=f"months since start year ({sim_kyr} ka)"))
-        precip_da = precip_da * 31 * 24 * 3600 # integrate over bin width (natural binwidth is 31 days)
-    
+    # bin to desired resolution
     if res is not None :
         # bin time to the desired resolution (in months)
-        if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
-        delta18 = utils.bin_xrDataArray_time(delta18,res=res,method='weighted_mean' if amount_weighted else 'median',weights=precip_da if amount_weighted else None)
-        if P :
-            # we bin the precip data to the desired resolution 
-            precip_da = utils.bin_xrDataArray_time(precip_da,res=res, method='sum')
-
-    if regions is not None :
-        delta18 = utils.mask_regions_shape(delta18,buffer_km=buffer_km,regions=regions)  
-        if P :
-            precip_da = utils.mask_regions_shape(precip_da,buffer_km=buffer_km,regions=regions) 
-    
-    if P :            
-        d18_P_ds = xr.Dataset({'d18Op':delta18, 'P': precip_da})
-    
-    # outputs differ depending on bools P_da, delta18_da... Return df of xrdataarrays.
-    if (not P)&(format=='xr') : return delta18
-    if P&(format=='xr') : return d18_P_ds
-    
-    if verbose : print('   converting xr to DataFrame (~2 minutes)')
-    if format=='df' :
+        if verbose : print(f'   bins of width={res} years') # type:ignore
+        if d18O : 
+            delta18 = utils.bin_xrDataArray_time(delta18,res=res,method='weighted_mean' if amount_weighted else 'median',weights=precip_da if amount_weighted else None) #type:ignore
+            delta18 = delta18.assign_coords(time=('time',-delta18.time.values)) # type:ignore # remove the minus sign of the ka BP values
         if P : 
-            d18_P_df= d18_P_ds.to_dataframe().reset_index().dropna(subset=['P','d18Op'])
-            print('itrace df ready')
-            return d18_P_df
-        else :
-            d18_df = delta18.to_dataframe(name='d18Op').reset_index().dropna() #type:ignore
-            print('itrace_df ready')
-            return d18_df
+            precip_da = utils.bin_xrDataArray_time(precip_da,res=res, method='sum') # type:ignore
+            precip_da = precip_da.assign_coords(time=('time',-precip_da.time.values))
+        if T :
+            trefht_da = utils.bin_xrDataArray_time(trefht_da,res=res, method='median') # type:ignore # T is used for converting d18Oc to d18Op, before any temporal binning -> no need of weighted avg here.
+            trefht_da = trefht_da.assign_coords(time=('time',-trefht_da.time.values))
+    
+    if regions is not None :
+        if d18O : delta18 = utils.mask_regions_shape(delta18,buffer_km=buffer_km,regions=regions)  
+        if P :    precip_da = utils.mask_regions_shape(precip_da,buffer_km=buffer_km,regions=regions) 
+        if T :    trefht_da = utils.mask_regions_shape(trefht_da,buffer_km=buffer_km,regions=regions) 
+    
+    # define the output and return it
+    if P and d18O : output = xr.Dataset({'d18Op':delta18, 'P': precip_da})
+    elif P :        output = precip_da
+    elif d18O :     output = delta18
+    elif T :        output = trefht_da
+
+    if format=='df' :
+        if P and d18O : subset = ['P','d18Op']
+        elif P :        subset = ['P']
+        elif d18O :     subset = ['d18Op']
+        elif T :        subset = ['TREFHT']
+
+        output= output.to_dataframe().reset_index().dropna(subset=subset) #type:ignore
+        
+    return output 
 
 def ked(df_to_krige : pd.DataFrame,
         df_ext_drift : pd.DataFrame,

@@ -13,14 +13,14 @@ sns.set_style('dark')
 # CONFIGURATION
 # ==========================================================================================
 # NAME OF EXPERIMENT
-exp_name = '2026-04-10_debug'
+exp_name = '2026-04-14_itrace_wd18O/'
 
 # DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
-sisal = False
-itrace = True
+sisal = True
+itrace = False
 
 # PARAMETERS LISTS :
-mask_itrace_around_sisal_pts = False # variography on itrace masked at sisal points?
+mask_itrace_around_sisal_pts = True # variography on itrace masked at sisal points?
 mask_radius = 2000
 
 trends = [
@@ -54,28 +54,28 @@ trends = [
 azimuths = [None] # 0,45,90,180] # 0 45 90 180 # for directional variograms
 
 # how to access itrace data ? Need the datafolder (not provided in my repo, seee intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
-itrace_folder = '/home/luluxette/Documents/master-thesis/geostat-isoscapes/data/iTraCE/'#"/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
+itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
 with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
     itrace_sims = json.load(f)
 
 # keep only the simulations of interest (each key represent a 1000 yr slice)
 sims = dict((k,itrace_sims[k]) for k in (
     '12',
-    # '13',
-    # '14',
-    # '15',
-    # '16',
-    # '17',
-    # '18',
-    # '19',
-    # '20'
+    '13',
+    '14',
+    '15',
+    '16',
+    '17',
+    '18',
+    '19',
+    '20'
     ) if k in itrace_sims)
 
 # If not computing on itrace, define instead a dummy key for accessing a sisal slice or all times
 # e.g. : sims = {'1':{}}  for the slice 0-1000 yr BP or sims={'all':{} } for all time points
 # sims = {'all':{}}
 
-res_months_list = [12*200] # min resolution is 12 months if using sisal, 1 month if using itrace
+res_list = [200] # min resolution is 1 year
 save_all=  True # whether to save all variograms data (not only the aggregated one over 1000yr).
 verbose = False
 
@@ -102,7 +102,7 @@ model_bounds = (
     np.array([
         0.0,   # min range
         0.0,   # min sill
-        0.2]), # min nugget  : here you can force the model to have non-zero nugget
+        0.0]), # min nugget 
     np.array([
         maxlag,# max range 
         50,    # max sill
@@ -116,16 +116,16 @@ data_cols = {'lat':'lat','lon':'lon','quantity':'d18Op'}
 cols_sisal = ['binned_age','lat','lon','site_id','d18Op_VSMOW_exactconv']
 
 # Prepare the iterations 
-iters = itertools.product(res_months_list,sims.keys(),regions_list,trends,azimuths)
+iters = itertools.product(res_list,sims.keys(),regions_list,trends,azimuths)
 
 tmp_kyr = None
 tmp_regions = None
 tmp_res = None
 init = True # turns to false after first iteration
 
-for res_months,kyr,regions,trend,azimuth in iters :
+for res,kyr,regions,trend,azimuth in iters :
     print('====================================================================================================================')
-    print(f'Time={kyr} kyr BP, resolution={res_months} months, trend={trend}, direction={azimuth}, regions={regions}')
+    print(f'Time={kyr} kyr BP, resolution={res} years, trend={trend}, direction={azimuth}, regions={regions}')
     print('====================================================================================================================')
     # ======================= CONFIGURATION =======================
     params = {
@@ -144,7 +144,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
         'model_bounds': model_bounds,
         'mask radius [km]': mask_radius,
         'plot_mask':True,
-        'res [months]': res_months,
+        'res [years]': res,
         'direction': azimuth,
         'regions':regions,
         'buffer_km': buffer_km,
@@ -160,13 +160,13 @@ for res_months,kyr,regions,trend,azimuth in iters :
                                                 'suffix': sims[kyr]['suffix'], 
                                                 'prefix':'b.e13.Bi1850C5.f19_g16'}
     
-        fp_itrace = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [months]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
+        fp_itrace = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [years]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
         if mask_itrace_around_sisal_pts :
             fp_itrace = fp_itrace + f"sisal_mask_{mask_radius}km/"
         else : 
             fp_itrace = fp_itrace + "no_mask/"
     if sisal : 
-        fp_sisal = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/sisal/slice{params['kyr']}kyrBP/res{params['res [months]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
+        fp_sisal = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/sisal/slice{params['kyr']}kyrBP/res{params['res [years]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
     if regions is not None :
         str_regions = ''
         for r in regions[1]: #type:ignore
@@ -186,9 +186,9 @@ for res_months,kyr,regions,trend,azimuth in iters :
     # set a change "tracker" to avoid repeating if statements
     sisal_change = False
     # 1. If the resolution changed, we must reload sisal global data
-    if (sisal & (tmp_res!=res_months)) | (mask_itrace_around_sisal_pts & init):
+    if (sisal & (tmp_res!=res)) | (mask_itrace_around_sisal_pts & init):
         # print('----- New sisal resolution : loading sisal global df')
-        sisal_df_global = gutils.get_sisal_data_for_kriging(res=int(res_months/12),
+        sisal_df_global = gutils.get_sisal_data_for_kriging(res=int(res),
                                                             temp_ds_name='itrace',
                                                             temp_ds_path=itrace_folder,
                                                             regions=None,
@@ -206,21 +206,23 @@ for res_months,kyr,regions,trend,azimuth in iters :
 
     # 3. If the temporal slice (kyr) is not the same as previous iteration, 
     #    we just need to take the right slice of sisal data (no reload)
-    if (sisal | mask_itrace_around_sisal_pts) & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res_months)) | sisal_change) :
+    if (sisal | mask_itrace_around_sisal_pts) & (((tmp_kyr is None)|((kyr!=tmp_kyr))|(tmp_res!=res)) | sisal_change) :
         # print('----- New sisal upper-level params region or res was set, or new temporal slice param detected : taking the new slice from sisal df')
         if kyr!='all':
-            sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>=(int(kyr)-1)*1000)&(sisal_df['binned_age']<int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
+            sisal_df_valid = sisal_df.loc[(sisal_df['binned_age']>(int(kyr)-1)*1000)&(sisal_df['binned_age']<=int(kyr)*1000),cols_sisal].rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() #type:ignore
         else :
             sisal_df_valid = sisal_df.rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'}).copy() # type:ignore
 
     # 4. For itrace, we need to reload in any case since we cannot load several slices at the smae time
     itrace_change = False
-    if itrace & ((tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months)): 
+    if itrace & ((tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res)): 
         # print('----- New itrace params res or kyr : loading appropriate data')
         itrace_data_global = gutils.get_preprocessed_itrace_data(
             data_folder=itrace_folder,
-            res=itrace_params['res [months]'],
+            res=itrace_params['res [years]'],
+            true_kyr=int(itrace_params['Itrace simulation spec']['kyr']),
             P=True,
+            d18O=True,
             format='xr',
             verbose=verbose,
             regions=None,
@@ -242,7 +244,7 @@ for res_months,kyr,regions,trend,azimuth in iters :
 
     # 5. update our temporary values of kyr and res
     tmp_kyr = kyr
-    tmp_res = res_months
+    tmp_res = res
     tmp_regions = regions
 
     # VARIOGRAMS ##########################################

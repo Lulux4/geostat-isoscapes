@@ -247,6 +247,9 @@ def get_basic_cleaned_merged_sisal_data(verbose=True)-> DataFrame:
         col_sample = col_sample
         )
     if verbose : print('loading and cleaning done.')
+
+    merged_data = merged_data.rename(columns={'latitude':'lat','longitude':'lon'})
+
     return merged_data
 
 def set_samples_age_and_uncert(sample_df : pd.DataFrame,
@@ -333,8 +336,8 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
                       'aragonite':[18.34,31.954]
                       }
     converted_data = calcite_df.copy()
-    converted_data['d18Op_VSMOW_exactconv'] = np.nan
-    converted_data['d18Op_VSMOW_linearized'] = np.nan
+    converted_data['d18Op_VSMOW_exactconv'] = pd.NA
+    converted_data['d18Op_VSMOW_linearized'] = pd.NA
 
     for mineralogy in ['calcite','aragonite']:
         mask = converted_data["mineralogy"]==mineralogy
@@ -354,28 +357,42 @@ def convert_calcite_to_drip_water(calcite_df : DataFrame) -> DataFrame :
         # print(f"   for mineralogy {mineralogy}, the conversion failed for {converted_data.loc[mask,'d18Op_VSMOW'].isna().sum()} samples.")
     return converted_data
 
-def retrieve_T_RegularGridInterp(data_df : DataFrame, 
-                                 temp_xda : DataArray, 
+def retrieve_variable_RegularGridInterp(data_df : DataFrame, 
+                                 regular_data_xda : DataArray, 
                                  method : str = 'linear',
-                                 data_lon_col='longitude',
-                                 data_lat_col='latitude',
-                                 temp_lon_col='lon',
-                                 temp_lat_col='lat'
+                                 naming_dict = {
+                                     'data_lon_col':'lon',
+                                     'data_lat_col':'lat',
+                                     'data_time_col':'age',
+                                     'regular_data_lon_dim':'lon',
+                                     'regular_data_lat_dim':'lat',
+                                     'regular_data_time_dim':'time',
+                                     'variable_name':'T'
+                                     },
                                  ) -> DataFrame :
-    ''' Retrieve the temperature of each sample of data_df by interpolating temp_xda values at data_df points using scipy RegularGridInterpolator
+    ''' Retrieve the value of a specified variable (in regular_data_xda) at each point of data_df by interpolating regular_data_xda values at data_df points using scipy RegularGridInterpolator
     Inputs :
         - data_df : DataFrame containing columns 'latitude', ' longitude', chrono. The chrono column should contain **positive** ages in yrs BP
-        - temp_xda : DataArray containing a global temperature dataset with dimensions 'lat','lon','time'. 
+        - regular_data_xda : DataArray (xarray, gridded data)containing a global variable field dataset with dimensions 'lat','lon','time'. 
                     
         - method : str of the name of the method to use to interpolate the temperature data points. Supported : "linear", "nearest", "slinear", "cubic", "quintic" and "pchip".
     Output : 
-        - data_df : with an exra column 'T_interp' containing the temperature associated to each sample row.
+        - data_df : with an exra column '{variable_name}_interp' containing the variable value associated to each sample row.
     '''
+    # names of the columns and variables...
+    regular_data_lat_dim = naming_dict['regular_data_lat_dim']
+    regular_data_lon_dim = naming_dict['regular_data_lon_dim']
+    regular_data_time_dim = naming_dict['regular_data_time_dim']
+    data_time_col = naming_dict['data_time_col']
+    data_lat_col  = naming_dict['data_lat_col']
+    data_lon_col  = naming_dict['data_lon_col']
+    variable_name = naming_dict['variable_name']
+
     # set up the interpolator
-    temp_lats  = temp_xda[temp_lat_col].values.copy()
-    temp_lon   = temp_xda[temp_lon_col].values.copy()
-    temp_times = temp_xda['time'].values.copy()
-    temp_values = temp_xda.values
+    temp_lats  = regular_data_xda[regular_data_lat_dim].values.copy()
+    temp_lon   = regular_data_xda[regular_data_lon_dim].values.copy()
+    temp_times = regular_data_xda[regular_data_time_dim].values.copy()
+    temp_values = regular_data_xda.values
 
     # check that all lons and lats are defined in the right convention 
     if any(temp_lats>90):
@@ -401,9 +418,9 @@ def retrieve_T_RegularGridInterp(data_df : DataFrame,
     )
 
     # set up sample points for interpolation
-    sample_times = np.asarray(data_df['age'].values)
-    sample_lats = np.asarray(data_df[data_lat_col].values)
-    sample_lons = np.asarray(data_df[data_lon_col].values)
+    sample_times = np.asarray(data_df[data_time_col].values)
+    sample_lats  = np.asarray(data_df[data_lat_col ].values)
+    sample_lons  = np.asarray(data_df[data_lon_col ].values)
 
     # check that all lons and lats are defined in the right convention 
     if any(sample_lats> 90):
@@ -414,32 +431,82 @@ def retrieve_T_RegularGridInterp(data_df : DataFrame,
     points = np.column_stack([sample_times, sample_lats, sample_lons]) # type: ignore
 
     # interpolate
-    data_df[f'T_{method}'] = interp_func(points)
+    output_df = data_df.copy()
+    output_df[f'{variable_name}_{method}'] = interp_func(points)
     
-    return data_df
+    return output_df
 
-def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame, temp_xda : DataArray, method : str = 'linear', verbose: bool = True)-> DataFrame :
+def retrieve_variable_two_methods(
+        data_df,
+        regular_data_xda,
+        methods=['linear','nearest'],
+        naming_dict = {
+             'data_lon_col':'lon',
+             'data_lat_col':'lat',
+             'data_time_col':'age',
+             'regular_data_lon_dim':'lon',
+             'regular_data_lat_dim':'lat',
+             'regular_data_time_dim':'time',
+             'variable_name':'T'
+             },
+        verbose=True):
+    """ This function retrieves the variable specified in argument and defined in regular_data_xda at the points of data_df using two interpolation methods 
+    also specified. It returns the data_Df with the extra column variable_name containing the variable values found.
+    """
+    # Retrieve name of the variable 
+    variable_name = naming_dict['variable_name']
+
+    # FIRST METHOD
+    data_with_variable = retrieve_variable_RegularGridInterp(data_df = data_df,regular_data_xda = regular_data_xda, method = methods[0],naming_dict=naming_dict)
+    # -> Mask locs and times for which this method failed
+    mask_nan = data_with_variable[f'{variable_name}_{methods[0]}'].isna()
+
+    # SECOND METHOD : apply the second method for these points, if any
+    if mask_nan.sum() :
+        if verbose : print(f'   {methods[0]} interpolation failed for {mask_nan.sum()} samples, trying to fill missing values with method {methods[1]}')
+        data_with_variable[f'{variable_name}_{methods[1]}'] = pd.NA
+        data_with_variable.loc[mask_nan,f'{variable_name}_{methods[1]}'] = retrieve_variable_RegularGridInterp(
+            data_df=data_df[mask_nan].copy(),
+            regular_data_xda=regular_data_xda,
+            method=methods[1],
+            naming_dict=naming_dict)[f'{variable_name}_{methods[1]}']
+        
+    # FORMATTING THE OUTPUT
+    data_with_variable.loc[ mask_nan,variable_name] = data_with_variable.loc[mask_nan,f'{variable_name}_{methods[1]}']
+    data_with_variable.loc[~mask_nan,variable_name] = data_with_variable.loc[~mask_nan,f'{variable_name}_{methods[0]}']
+    mask_nans_final = data_with_variable[variable_name].isna()
+    if verbose : print(f'   after {methods[0]} interpolation and {methods[1]} backup, still no {variable_name} for', mask_nans_final.sum(),'samples.')
+    
+    if variable_name not in data_df.columns :
+        cols = list(data_df.columns)+[variable_name]
+    else :
+        cols = list(data_df.columns)
+    return data_with_variable[cols]
+
+def retrieve_temperature_and_convert_speleothem_d18O(data_df : DataFrame,
+                                                     temp_xda : DataArray,
+                                                     naming_dict : dict = {'data_lon_col':'lon',
+                                                                           'data_lat_col':'lat',
+                                                                           'data_time_col':'age',
+                                                                           'temp_data_lon_dim':'lon',
+                                                                           'temp_data_lat_dim':'lat',
+                                                                           'temp_data_time_dim':'time'},
+                                                     method : str = 'linear',
+                                                     verbose: bool = True
+                                                     )-> DataFrame :
     ''' 1) retrieves temperature of data_df samples based on the temp_xda datarray provided (interpolation with specified method + NN as backup) 
         2) convert speleothem PDB d18O into precipitation VSMOW d18O using Tremaine equation.
         Be careful : the convention for the dates should be the same for both data_df and temp_xda (for instance, time dim can be years before present, so that 12 means 12 years BP.)
     '''
     if verbose : print("-> converting speleothem data")
-    # 1. Temperature retrieval 
-    data_to_convert = retrieve_T_RegularGridInterp(data_df = data_df,temp_xda = temp_xda, method = 'linear')
-    #    Mask locs and times for which this method failed
-    mask_nan = data_to_convert['T_linear'].isna()
-    #    Apply the NN method for these points, if any
-    if mask_nan.sum() :
-        if verbose : print(f'   {method} interpolation failed for {mask_nan.sum()} samples, trying to fill missing T with nearest neighbour method')
-        data_to_convert['T_nearest'] = pd.NA
-        data_to_convert.loc[mask_nan,'T_nearest'] = retrieve_T_RegularGridInterp(data_df=data_df[mask_nan].copy(),
-                                                                                 temp_xda=temp_xda,
-                                                                                 method='nearest')['T_nearest']
-    #    Gather T in a T column
-    data_to_convert.loc[ mask_nan,'T'] = data_to_convert.loc[mask_nan,'T_nearest']
-    data_to_convert.loc[~mask_nan,'T'] = data_to_convert.loc[~mask_nan,'T_linear']
-    mask_nans_final = data_to_convert['T'].isna()
-    if verbose : print(f'   after {method} interpolation and nearest neighbour backup, still no temperature for', mask_nans_final.sum(),'samples.')
+    # 1. Temperature retrieval
+    # prepare naming dict 
+    naming_dict['variable_name']='T'
+    naming_dict['regular_data_lon_dim']=naming_dict['temp_data_lon_dim']
+    naming_dict['regular_data_lat_dim']=naming_dict['temp_data_lat_dim']
+    naming_dict['regular_data_time_dim']=naming_dict['temp_data_time_dim']
+    # retrieve T using regulargrid interpolator
+    data_to_convert = retrieve_variable_two_methods(data_df=data_df,regular_data_xda=temp_xda,methods=[method,'nearest'],naming_dict=naming_dict,verbose=verbose)
     if verbose : print("   temperature retrieval finished, starting conversion")
     
     # 2. Conversion 

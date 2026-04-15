@@ -56,11 +56,11 @@ def prepare_ds_of_ked_isoscsape(ked_df : pd.DataFrame)->xr.Dataset :
 def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     """ This function bins a pandas Series with integer bin labels according to the given bin width.
     
-    This function outputs the series of bins labels, which are defined as the lower bound of each bin range. 
-    E.g : bin "0" spans [0,0+width[.
+    This function outputs the series of bins labels, which are defined as the upper bound of each bin range. 
+    E.g : bin "width" spans [0,0+width[.
 
     If the series has positive and negative values, the binning forces the creation of bins from 0 to the max, and from 0 to the min in the reverse direction.
-    Ex : [-19,-16,-4,-1,2,6,8,18] with a bin width of 5 is binned as [-15,-15,-5,-5,0,5,5,15].
+    Ex : [-19,-16,-4,-1,2,6,8,18] with a bin width of 5 is binned as [-20,-20,-5,0,5,10,10,20].
     
     Inputs :
         - series : pd.Series containing float values to bin
@@ -71,21 +71,21 @@ def slice_in_equal_bins(series : pd.Series, bin_width: int) -> pd.Series :
     bins=None
     if series.max() > 0 :
         start = max(0,series.min())
-        bins_pos = np.array(range(int(start), int(series.max())+ bin_width + 1, bin_width))
+        bins_pos = np.array(range(int(start-bin_width), int(series.max())+ bin_width + 1, bin_width))
         bins = list(bins_pos)
     if series.min()<0 :
-        start = min(0-bin_width,series.max())
-        stop = min(series.min(),start-bin_width)
+        start = min(0,(series.max()//3+1) *3)
+        stop = min(series.min()-bin_width,start-bin_width)
         bins_neg = np.sort(- np.array(range( - int(start), -int(stop), bin_width)))
         if bins is not None : 
-            bins = list(np.concat([bins_neg,bins_pos]))
+            bins = list(np.sort(list(set(list(np.concat([bins_neg,bins_pos]))))))
         else :
             bins = list(bins_neg)
     
     if bins is None : # sanity check
         raise ValueError('this series does not contain numbers or is empty.')
 
-    binned_series = pd.cut(series, bins, labels = bins[:-1],right=False)
+    binned_series = pd.cut(series, bins, labels = bins[1:],right=True)
     return binned_series
 
 def bin_xrDataArray_time(da : xr.DataArray, res : int, method : str = 'median', weights : xr.DataArray | None = None) -> xr.DataArray : 
@@ -114,6 +114,68 @@ def get_yrBP_from_itrace_time(months_after_start : int | pd.Series | np.ndarray,
     """ Retrieve the year (+decimals) depending on a start year in yr BP (positive number) and the number of months spent since this start year.
     """
     return -( -start_year + months_after_start/12)
+
+def set_itrace_xarray_time_to_yrBP(da : xr.DataArray | xr.Dataset, start_year : float = 12001) -> xr.DataArray | xr.Dataset:
+    """ This function sets the time coordinate of a xarray dataset or dataarray to years before present (1950), depending on a start year in yr BP and the number of months spent since this start year. 
+    The time coordinate is expected to be in months after the start year, as in iTrace simulations.
+    """
+    timearray = get_yrBP_from_itrace_time(np.array(range(0,len(da.time),1)), start_year)
+    da = da.assign_coords(time=('time',-timearray)) # type:ignore # we keep the minus sign to conserve the order 20 ka BP before 19 ka BP (for the binning)
+    da = da.assign_coords(time = da.time.assign_attrs(units=f"years before present (1950)"))
+    return da
+
+def define_d18O_itrace(rain_h2otr_fp,rain_h218o_fp,snow_h2otr_fp,snow_h218o_fp,kyr):
+    """ This function defines the d18O of precipitation in iTrace simulations, using the RAIN_H2OTR, RAIN_H218O, SNOW_H2OTR and SNOW_H218O variables. 
+    The d18O is defined as : d18O = ((RAIN_H218O + SNOW_H218O) / (RAIN_H2OTR + SNOW_H2OTR) -1)*1000
+    """
+    file_rH218O = load_xarray_datarray(rain_h218o_fp)
+    file_rH2OTR = load_xarray_datarray(rain_h2otr_fp)
+    file_sH218O = load_xarray_datarray(snow_h218o_fp)
+    file_sH2OTR = load_xarray_datarray(snow_h2otr_fp)
+
+    # compute the delta18Op at each time step and each point
+    h218o = file_rH218O.RAIN_H218O
+    h2o = file_rH2OTR.RAIN_H2OTR
+    h218o += file_sH218O.SNOW_H218O
+    h2o += file_sH2OTR.SNOW_H2OTR
+    delta18 = ( h218o/h2o - 1.0) * 1000.0
+    delta18 = delta18.where( (h2o> 1e-12) & (delta18 < 1e2) )  # avoid div by near-0 precip values and large positive outliers (delta18 should be mostly negative and small -20/+20)
+
+    # The itrace doc specifies explicetely that the temporal resolution is in months, so we can define the time dimension in terms of months after a start year.
+    # timearray = range(0,len(delta18.time),1)
+    # delta18 = delta18.assign_coords(time=('time',timearray))
+    # delta18 = delta18.assign_coords(time = delta18.time.assign_attrs(units=f"months since start year ({kyr} ka)"))
+    delta18 = set_itrace_xarray_time_to_yrBP(delta18, start_year=kyr*1000)
+
+    return delta18
+
+def define_precipitation_itrace(rain_fp,snow_fp,kyr):
+    """ This function defines the precipitation amount in iTrace simulations, using the RAIN and SNOW variables.
+    """
+    file_rain = load_xarray_datarray(rain_fp)
+    file_snow = load_xarray_datarray(snow_fp)
+    precip_da = file_rain.RAIN
+    precip_da += file_snow.SNOW
+
+    # TODO : i need to adapt the entire pipeline to this new logic with the time unit : i shoudl remove the commented lines when i am sure it works :)
+    # The itrace doc specifies explicetely that the temporal resolution is in months, so we can define the time dimension in terms of months after a start year.
+    # timearray = range(0,len(precip_da.time),1)
+    # precip_da = precip_da.assign_coords(time =('time',timearray))
+    # precip_da = precip_da.assign_coords(time = precip_da.time.assign_attrs(units=f"months since start year ({kyr} ka)"))
+    precip_da = precip_da * 31 * 24 * 3600 # integrate over bin width (natural binwidth is 31 days)
+    # Switch the time dimension to yrBP
+    precip_da = set_itrace_xarray_time_to_yrBP(precip_da, start_year=kyr*1000)
+
+    return precip_da
+
+def define_temperature_itrace(trefht_fp,kyr):
+    """ This function defines the temperature at the surface in iTrace simulations, using the TREFHT variable.
+    """
+    trefht_da = load_xarray_datarray(trefht_fp).TREFHT
+    # Switch the time dimension to yrBP
+    trefht_da = set_itrace_xarray_time_to_yrBP(trefht_da, start_year=kyr*1000)  
+
+    return trefht_da
 
 # =============================================================================================
 # "Spatial" computations
@@ -394,50 +456,3 @@ def PES(z_obs,z_pred,ss_pred):
 def logbias(y_true,y_pred):
     """ Log bias metric (dB) """
     return 10.0*np.log10(np.sum(y_true)/np.sum(y_pred))
-
-######## Temperature data loader
-def get_itrace_temperature_dataset(
-        data_folder = "/media/luluxette/T7_Shield/pdm/iTrace/",
-        sim_prefix = 'b.e13.Bi1850C5.f19_g16',
-        sim_kyr = 12,
-        true_kyr = 12,
-        sim_forcings = 'ice_ghg_orb_wtr',
-        sim_num = '05',
-        sim_model = 'clm2.h0',
-        sim_suffix = '800001-899912',
-        res=12,
-        regions : tuple[str,list[str]]| None = None,
-        buffer_km : float = 50,
-        format : str = 'df',
-        verbose : bool = True) :
-    """ Loads the temperature data of iTraCE simulations from the specified arguments leading to the temporature output file.
-    See the documentation on get_preprocessed_itrace function for more details. 
-    res : in ***MONTHS***
-    format : df or xr
-    """
-    if verbose : print('loading itrace temperature file...')
-    fn_itrace_TREFHT = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}.TREFHT.{sim_suffix}.nc'
-    file_TREFHT = load_xarray_datarray(fn_itrace_TREFHT)
-    TREFHT_da = file_TREFHT.TREFHT 
-    # Switch the time dimension to yr BP unit.
-    if verbose : print('This dataset contains ',len(TREFHT_da.time), ' time steps.') # just to check
-
-    timearray = get_yrBP_from_itrace_time(np.array(range(0,len(TREFHT_da.time),1)),true_kyr*1000)
-    TREFHT_da = TREFHT_da.assign_coords(time=('time',-timearray)) # type:ignore # we keep the minus sign to conserve the order 20 ka BP before 19 ka BP (for the binning)
-    TREFHT_da = TREFHT_da.assign_coords(time = TREFHT_da.time.assign_attrs(units=f"years before present (1950)"))
-
-    if res is not None :
-        if verbose : print(f'   bins of width={res} months ({res//12} years)') # type:ignore
-        TREFHT_da = bin_xrDataArray_time(TREFHT_da,res=res//12) # since TREFHT is now in yr BP, we need res to be in years
-    if regions is not None :
-        TREFHT_da = mask_regions_shape(TREFHT_da,buffer_km=buffer_km,regions=regions)  
-    TREFHT_da = TREFHT_da.assign_coords(time=('time',-TREFHT_da.time.values)) # type:ignore # remove the minus sign of the ka BP values
-
-    # output in chosen format : df of xrdataarray.
-    if format=='xr' : return TREFHT_da
-    if verbose : print('   converting xr to DataFrame...')
-    if format=='df' :
-        TREFHT_df = TREFHT_da.to_dataframe(name='TREFHT').reset_index().dropna() #type:ignore
-        print('done')
-        return TREFHT_df
-    raise ValueError('format must be either df or xr.')
