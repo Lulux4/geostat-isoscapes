@@ -1,8 +1,9 @@
 data/tests/
-data/iTraCE/
 data/elevation/
 output/data_exploration/
 output/ked_firsttests/
+output/kriging/runs_wip/
+output/essd_figs/
 output/perso/
 output/variograms/
 src/geostat_isoscapes_tools.egg-info
@@ -15,3 +16,4 @@ data/shapefiles/
 problems/
 .vscode/
 data/modern/RCWIP2_isoscape/README.docx
+notebooks/holocene_itrace.ipynb

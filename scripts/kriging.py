@@ -13,7 +13,7 @@ sns.set_style('dark')
 # Define the experimental setup
 # ==================================
 
-exp_name  = 'run_2026_03_05_all_varios/' # name of expermiment 
+exp_name  = 'run_2026_04_28/runs_wip/' # name of expermiment 
 
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
@@ -22,12 +22,12 @@ exp_name  = 'run_2026_03_05_all_varios/' # name of expermiment
 caves_to_exclude = []
 
 # Aggregated vario :
-# vario_path = f'{utils.get_project_root()}/output/variograms/2026-02-24_sisal_vs_itrace/itrace/vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json'
+# vario_path = f'{utils.get_project_root()}/output/variograms/2026-04-14_itrace_wd18O/itrace/vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json'
 # vario_subfolders = None
 
 # Or all varios :
-vario_path = f'{utils.get_project_root()}/output/variograms/2026-02-24_sisal_vs_itrace/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
-vario_subfolders = '/res2400/maxlag10000000nlags15/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
+vario_path = f'{utils.get_project_root()}/output/variograms/2026-04-14_itrace_wd18O/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
+vario_subfolders = '/res200/maxlag10000000nlags10/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
 
 alpha = 0.10 # max acceptable type I error rate for the Kleijnen test
 
@@ -50,19 +50,19 @@ sims = dict((k,itrace_sims[k]) for k in ('12',
                                          '20'
                                          ) if k in itrace_sims)
 
-res_months_list = [12*200] # min resolution is 12 months
+res_list = [200] # min resolution is 12 months
 
 verbose = False
 
 # Prepare the iterations 
-iters = itertools.product(res_months_list,sims.keys())
+iters = itertools.product(res_list,sims.keys())
 tmp_kyr = None
 tmp_res = None
 df_list = []
 
-for res_months,kyr in iters :
+for res,kyr in iters :
     print('====================================================================================================')
-    print(f'Time={kyr} ka BP, resolution={res_months} months')
+    print(f'Time={kyr} ka BP, resolution={res} years')
     print('====================================================================================================')
     # ======================= CONFIGURATION =======================
     params = {
@@ -70,7 +70,7 @@ for res_months,kyr in iters :
         'trend_before_mask': True,
         'tolerance' : 22.5,
         'vario_path' : vario_path,
-        'res [months]': res_months,
+        'res [years]': res,
         }
     
     itrace_params = params.copy()
@@ -83,16 +83,16 @@ for res_months,kyr in iters :
         'suffix': sims[kyr]['suffix'], 
         'prefix':'b.e13.Bi1850C5.f19_g16'
     }
-    fp_output = f"{utils.get_project_root()}/output/kriging/{exp_name}/res{itrace_params['res [months]']}/"
+    fp_output = f"{utils.get_project_root()}/output/kriging/{exp_name}/res{itrace_params['res [years]']}/"
     if not os.path.exists(fp_output):
         os.makedirs(fp_output)
     
     # ================= DATASETS LOADING ====================================================
     # 1. If res changed, we reload sisal global data
-    if (tmp_res!=res_months):
-        print(f'..... Loading sisal dataset, resolution {res_months//12}')
+    if (tmp_res!=res):
+        print(f'..... Loading sisal dataset, resolution {res}')
         sisal_df = gutils.get_sisal_data_for_kriging(
-            res=int(res_months//12),
+            res=int(res),
             temp_ds_name=temperature_ds_name,
             temp_ds_path=temperature_ds_path,
             verbose=verbose
@@ -100,19 +100,23 @@ for res_months,kyr in iters :
         if not isinstance(sisal_df,pd.DataFrame) :
             raise TypeError('data to krige should be a pd df')
         sisal_df = sisal_df.rename(columns={'binned_age':'time','d18Op_VSMOW_exactconv':'d18Op'})
+        sisal_df['d18Op'] = np.array(sisal_df.d18Op,dtype=np.float64)
+        
         # Remove Babylon cave as it is located at the exact same coordinates as Hollywood cave : pb for the kriging system
-        sisal_df  = sisal_df[sisal_df.site_name != 'Babylon cave']
+        sisal_df  = sisal_df[(sisal_df.site_name != 'Babylon cave')]
+        
         # remove other caves as specified in parameters
         sisal_df  = sisal_df[~sisal_df.site_name.isin(caves_to_exclude)]
 
-
     # 2. Reload itrace whenever the time slice changes -- bc separate files --
-    if (tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res_months): 
-        print(f'..... Loading itrace dataset for {kyr} ka BP at res {res_months} months')
+    if (tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res): 
+        print(f'..... Loading itrace dataset for {kyr} ka BP at res {res} months')
         itrace_data_global = gutils.get_preprocessed_itrace_data(
-            res=itrace_params['res [months]'],
+            true_kyr=int(kyr),
+            res=itrace_params['res [years]'],
             data_folder=itrace_folder,
             format='df',
+            amount_weighted=True,
             verbose=verbose,
             sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
             sim_suffix =itrace_params['Itrace simulation spec']['suffix'], 
@@ -129,7 +133,7 @@ for res_months,kyr in iters :
     
     # 3. update our temporary values of kyr and res
     tmp_kyr = kyr
-    tmp_res = res_months
+    tmp_res = res
 
     # 4. Load the variogram model and params # uncomment if using an aggregated variogram whose path is vario_path
     if vario_subfolders is None:
@@ -145,23 +149,29 @@ for res_months,kyr in iters :
     # At this step, we have the external drift df and sisal df at the same temporal resolution and time slice.
     # We can now loop on each of the time steps within the slice to perform kriging.
     # ========================================================================================================
-    for t_months, itrace_slice in tqdm(itrace_data.groupby("time",observed=True)): 
+    for t, itrace_slice in tqdm(itrace_data.groupby("time",observed=True)): 
         
-        yrBP_time = utils.get_yrBP_from_itrace_time(t_months,start_year=int(kyr)*1000) #type:ignore
         # OUTPUT FOLDER
-        fp_output_yrBP = f"{fp_output}plots_and_metrics/{str(int(yrBP_time))}yrBP/" #type:ignore
+        fp_output_yrBP = f"{fp_output}plots_and_metrics/{str(int(t))}yrBP/" #type:ignore
         if not os.path.exists(fp_output_yrBP):
             os.makedirs(fp_output_yrBP)
 
         # LOAD VARIOGRAM PARAMS IF NOT DONE BEFORE :
         if vario_subfolders is not None :
-            vario_fp = f"{vario_path}sim{kyr}kyrBP{vario_subfolders}variogram_params_None_t{int(t_months)}.json" #type:ignore
+            vario_fp = f"{vario_path}sim{kyr}kyrBP{vario_subfolders}variogram_params_None_t{int(t)}.json" #type:ignore
             with open(vario_fp, 'r') as f:
                 variogram_dict = json.load(f)
-            variogram_model = variogram_dict['model_name'] 
+            list_names = [param_name.split('_')[1]  for param_name in variogram_dict.keys() if (('range_' in param_name) or ('sill_' in param_name))] 
+            variogram_model = list(set(list_names))
+            if len(variogram_model)>1 : 
+                raise NotImplementedError('composite models are currently not supported')
+            
+            variogram_model = variogram_model[0]
+            if 'nugget' not in list(variogram_dict.keys()): variogram_dict['nugget']=0.0
+            
             variogram_parameters = {
-                "sill": variogram_dict['sill'], 
-                "range": variogram_dict['range'],  
+                "sill": variogram_dict[f'sill_{variogram_model}'], 
+                "range": variogram_dict[f'range_{variogram_model}'],  
                 "nugget": variogram_dict['nugget']
             }
 
@@ -169,7 +179,7 @@ for res_months,kyr in iters :
         external_drift_df = itrace_slice.dropna() 
         if any(external_drift_df['lon']>180):
             external_drift_df['lon']=utils.convert_lon_0_360_to_neg180_180(np.asarray(external_drift_df['lon'].values))
-        sisal_bin_label = yrBP_time - res_months//12 # bins of sisal are defined as 'N':[N+width yrBP, N yrBP) while itrace is reversed : 'N':(N yrBP, N-width yrBP]...
+        sisal_bin_label = t # deprecated-> bins of sisal are defined as 'N':[N+width yrBP, N yrBP) while itrace is reversed : 'N':(N yrBP, N-width yrBP]...
         cols_to_keep =['site_name','site_id','lon','lat','d18O_measurement','d18Op','d18O_precision']
         data_to_krige = sisal_df[ (sisal_df['time']==sisal_bin_label)].copy()[cols_to_keep].groupby('site_name').mean()
 
@@ -184,7 +194,7 @@ for res_months,kyr in iters :
             variogram_parameters=variogram_parameters
         )        
         # CONFIDENCE FLAG
-        df_pred['time']=yrBP_time
+        df_pred['time']=t
         df_pred['confidence_flag']=1
         df_pred.loc[df_pred['ss_pred']>8,'confidence_flag']= 2
         df_pred.loc[df_pred['ss_pred']>16,'confidence_flag']=3

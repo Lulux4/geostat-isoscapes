@@ -28,7 +28,7 @@ output/kriging/speleothems_isoscapes_11_to_20kaBP.nc
 
 ```
 geostat-isoscapes/
-├── bin/                          # Executables scripts
+├── scripts/                     # Executables scripts
 │   ├── kriging.py               # Main kriging interpolation script
 │   └── variogram_parameters_scan.py  # Iterative variogram computations
 ├── data/                         # Data files
@@ -122,7 +122,7 @@ jupyter notebook notebooks/variography.ipynb
 Run the main kriging workflow to generate isoscapes:
 
 ```bash
-python bin/kriging.py
+python scripts/kriging.py
 ```
 
 Configure the script by editing parameters in `kriging.py`:
@@ -149,10 +149,10 @@ jupyter notebook notebooks/calcite_to_dripwater_conversion.ipynb
 
 ```bash
 # 1. Scan variogram parameters
-python bin/variogram_parameters_scan.py
+python scripts/variogram_parameters_scan.py
 
 # 2. Run kriging with best-fit variogram
-python bin/kriging.py
+python scripts/kriging.py
 
 # 3. Evaluate results
 jupyter notebook notebooks/kriging.ipynb

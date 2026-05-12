@@ -13,11 +13,11 @@ sns.set_style('dark')
 # CONFIGURATION
 # ==========================================================================================
 # NAME OF EXPERIMENT
-exp_name = '2026-04-14_itrace_wd18O/'
+exp_name = '2026-05-11/test1/anisotropy_SH/'
 
 # DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
-sisal = True
-itrace = False
+sisal = False
+itrace = True 
 
 # PARAMETERS LISTS :
 mask_itrace_around_sisal_pts = True # variography on itrace masked at sisal points?
@@ -39,21 +39,12 @@ trends = [
     # 'multiple_linear_lat_latquad_P_D', # /!/ P cannot be retrieved for sisal data
     # 'multiple_linear_lat_latquad_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_lat_latquad_ele_D',
-    # 'multiple_linear_lat_latquad_ele_P_D' # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU',
-    # 'multiple_linear_latabs_latReLU_P', # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU_D',
-    # 'multiple_linear_latabs_latReLU_ele',
-    # 'multiple_linear_latabs_latReLU_P_D', # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU_ele_P', # /!/ P cannot be retrieved for sisal data
-    # 'multiple_linear_latabs_latReLU_ele_D',
-    # 'multiple_linear_latabs_latReLU_ele_P_D'
-    
+    # 'multiple_linear_lat_latquad_ele_P_D' # /!/ P cannot be retrieved for sisal data   
     ]
 
-azimuths = [None] # 0,45,90,180] # 0 45 90 180 # for directional variograms
+azimuths = [0,90] # 0,45,90,180] # 0 45 90 180 # for directional variograms
 
-# how to access itrace data ? Need the datafolder (not provided in my repo, seee intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
+# how to access itrace data ? Need the datafolder (not provided in my repo, see intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
 itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
 with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
     itrace_sims = json.load(f)
@@ -68,7 +59,7 @@ sims = dict((k,itrace_sims[k]) for k in (
     '17',
     '18',
     '19',
-    '20'
+    '20',
     ) if k in itrace_sims)
 
 # If not computing on itrace, define instead a dummy key for accessing a sisal slice or all times
@@ -90,9 +81,16 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variography parameters
 model_name = 'spherical+nugget'
-maxlag = 10e6
-nlags = 10
-bin_func = 'even'
+maxlag = 5e6
+nlags = 15
+bin_func = 'even' #'uniform' # 'even' or 'uniform' # if you want bins defined with a fct
+# np.power(np.linspace(np.power(0.0, 1.0 / 1.75), np.power(1e7, 1.0 / 1.75), num=16), 1.75)
+large_lags_edges=np.linspace(0.0,10,11)
+large_lags_edges = large_lags_edges[large_lags_edges>4.5]
+min_large_lag = large_lags_edges[0]
+bin_edges = np.concatenate([np.linspace(0.0,large_lags_edges[0],8,endpoint=False),large_lags_edges]) *1e6
+bin_centers = None #(bin_edges[:-1] + bin_edges[1:]) / 2
+
 weighting = 'lags'
 weights_power = 0.5
 
@@ -104,7 +102,7 @@ model_bounds = (
         0.0,   # min sill
         0.0]), # min nugget 
     np.array([
-        maxlag,# max range 
+        5e7,# max range 
         50,    # max sill
         10     # max nugget
     ])
@@ -135,6 +133,7 @@ for res,kyr,regions,trend,azimuth in iters :
         'maxlag': maxlag,
         'nlags': nlags,
         'bin_func':bin_func,
+        'bin_centers':bin_centers,
         'weighting':weighting,
         'weights_power':weights_power,
         'centers': None,
@@ -150,6 +149,15 @@ for res,kyr,regions,trend,azimuth in iters :
         'buffer_km': buffer_km,
         'const_coords':False,}
     
+    if (maxlag is not None) & (nlags is not None):
+        str_vario_params = f'maxlag{str(int(maxlag))}nlags{nlags}' #type:ignore
+    if (bin_centers is not None):
+        str_vario_params = 'custom_bins'
+    if (( ((maxlag is None)     & (nlags is None)    ) 
+        |((maxlag is None)     & (nlags is not None))
+        |((maxlag is not None) & (nlags is None)    )) & (bin_centers is None)) : 
+        raise ValueError('You should provide either maxlag and nlags, or bin_centers for defining variogram bins')
+    
     if itrace : 
         itrace_params = params.copy()
         itrace_params['Itrace simulation spec'] = { 'kyr_filename': sims[kyr]['yrBPname'],
@@ -159,14 +167,14 @@ for res,kyr,regions,trend,azimuth in iters :
                                                 'forcings':sims[kyr]['forcings'],   
                                                 'suffix': sims[kyr]['suffix'], 
                                                 'prefix':'b.e13.Bi1850C5.f19_g16'}
-    
-        fp_itrace = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [years]']}/maxlag{str(int(itrace_params['maxlag']))}nlags{itrace_params['nlags']}/trend_{itrace_params['trend']}/"
+
+        fp_itrace = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/itrace/sim{itrace_params['Itrace simulation spec']['kyr']}kyrBP/res{itrace_params['res [years]']}/{str_vario_params}/trend_{itrace_params['trend']}/"
         if mask_itrace_around_sisal_pts :
             fp_itrace = fp_itrace + f"sisal_mask_{mask_radius}km/"
         else : 
             fp_itrace = fp_itrace + "no_mask/"
     if sisal : 
-        fp_sisal = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/sisal/slice{params['kyr']}kyrBP/res{params['res [years]']}/maxlag{str(int(params['maxlag']))}nlags{params['nlags']}/trend_{params['trend']}/"
+        fp_sisal = f"{utils.get_project_root()}/output/variograms/{params['exp_name']}/sisal/slice{params['kyr']}kyrBP/res{params['res [years]']}/{str_vario_params}/trend_{params['trend']}/"
     if regions is not None :
         str_regions = ''
         for r in regions[1]: #type:ignore
