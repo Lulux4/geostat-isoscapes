@@ -63,6 +63,7 @@ def plot_isoscape_latlon_platecarree_df(
         qty_col :str = 'd18Op',
         save_fp : str|None = None,
         s = 20,
+        size_col : str|None = None,
         unit : str|None = '‰',
         cmap='viridis',
         cmap_sym0 = False,
@@ -70,10 +71,21 @@ def plot_isoscape_latlon_platecarree_df(
         v_max : float|None = None,
         qty_label : str| None = None,
         figsize=(10,5),
-        adjust_extent=True
+        adjust_extent=True,
+        landcolor = "#d8d8d8",
+        oceancolor = "#dff4fd",
+        fig = None,
+        ax= None,
+        marker='s',
     ):
     """
     Plot the given dataframe with columns: lat, lon, qty on PlateCarree projection.
+    
+    Parameters:
+    -----------
+    size_col : str|None, optional
+        Column name in df containing marker sizes. If provided, marker sizes will be 
+        proportional to the values in this column. If None, all markers will have size `s`.
     """
     sns.set_theme(context='talk',
                   style='ticks',
@@ -86,39 +98,41 @@ def plot_isoscape_latlon_platecarree_df(
         v_min = min(df[qty_col].min(),-df[qty_col].max())
         v_max = max(df[qty_col].max(),-df[qty_col].min())
 
-    fig, ax = plt.subplots(figsize=figsize,
+    if (fig == None) or (ax == None):
+        fig, ax = plt.subplots(figsize=figsize,
                            subplot_kw={"projection": ccrs.PlateCarree()})
 
     if countries_borders:
         ax.add_feature(cfeature.BORDERS, linewidth=0.2)#type:ignore
     # ax.coastlines() # type:ignore
     ax.add_feature(cfeature.COASTLINE, linewidth=0.2) #type:ignore
-    ax.add_feature(cfeature.LAND, facecolor="#d8d8d8", edgecolor="none")#type:ignore
-    ax.add_feature(cfeature.OCEAN, facecolor="#dff4fd", edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.LAND, facecolor=landcolor, edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.OCEAN, facecolor=oceancolor, edgecolor="none")#type:ignore
     ax.set_axis_off()
     # gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray', alpha=0.5, linestyle='--')#type:ignore
     # gl.right_labels = gl.top_labels = False
     # Scatter plot of irregular points
+    marker_sizes = df[size_col] if size_col is not None else s
     sc = ax.scatter(
         df[lon_col],
         df[lat_col],
         c=df[qty_col],
         cmap=cmap,
         transform=ccrs.PlateCarree(),
-        s=s,
+        s=marker_sizes,
         edgecolor=None,#"#404040",
         linewidths=0.3,
         alpha=0.99,
         vmin=v_min,
         vmax = v_max,
-        marker='s'
+        marker=marker
     )
 
     # cbar = plt.colorbar(sc, ax=ax, label=qty_col)
     if qty_label is None :
         qty_label = qty_col
     divider = make_axes_locatable(ax)
-    cax= divider.append_axes("right", size="4%", pad=0.05,axes_class=Axes)
+    cax= divider.append_axes("right", size="4%", pad=0.02,axes_class=Axes)
     cbar = fig.colorbar(sc, cax=cax)
     cbar.outline.set_visible(False) # type: ignore
     if unit is not None :   
@@ -126,6 +140,39 @@ def plot_isoscape_latlon_platecarree_df(
     else :
         unit = ''
     cbar.set_label(qty_label+unit)
+
+    # Add size legend to the right if size_col is specified
+    if size_col is not None:
+        # Create axes for the size legend to the right of the colorbar
+        cbar_pos = cax.get_position()
+        legend_width = cbar_pos.width * 0.22
+        legend_x = cbar_pos.x0 + cbar_pos.width + 0.05
+        size_legend_ax = fig.add_axes([legend_x, cbar_pos.y0, legend_width, cbar_pos.height]) #type:ignore
+        
+        # Get size values for reference circles (min, median, max)
+        size_min = df[size_col].min()
+        size_max = df[size_col].max()
+        size_mid = (size_min + size_max) / 2
+        
+        size_values = [size_min, size_mid, size_max]
+        size_labels = ['Min', 'Med', 'Max']
+        
+        # Plot reference circles
+        for i, (size_val, label) in enumerate(zip(size_values, size_labels)):
+            y_pos = 0.8 - i * 0.1
+            size_legend_ax.scatter([0.26], [y_pos], s=size_val, c='gray', alpha=0.6,
+                                  transform=size_legend_ax.transAxes, edgecolors='darkgray', linewidths=0.5,marker=marker)
+            size_legend_ax.text(0.33, y_pos, f'{label} ({size_val/100:.2f})', ha='left', va='center',
+                               transform=size_legend_ax.transAxes, fontsize=16)
+        
+        # Add title for the size legend
+        size_legend_ax.text(0.26, 0.89, r'Size : $\sigma(\text{PES})$', ha='left', va='top',
+                           transform=size_legend_ax.transAxes, fontsize=16, weight='bold')
+        
+        # Clean up the axes
+        size_legend_ax.set_xlim(0, 1)
+        size_legend_ax.set_ylim(0, 1)
+        size_legend_ax.axis('off')
 
     valid = df.dropna(subset=[lat_col, lon_col, qty_col])
     eps = 3
@@ -193,7 +240,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
     sns.set_theme(context='talk',
                   style='ticks',
                   palette='colorblind',
-                  rc={'axes.linewidth':1.2,"grid.alpha":0.3,"grid.linestyle":'--'})
+                  rc={'axes.linewidth':1.2})
     
     # Define bin centers :
     bin_centers = bin_edges - np.r_[bin_edges[0],np.diff(bin_edges)]/2
@@ -320,7 +367,7 @@ def plot_variogram_from_bins_and_gamma(bin_edges : np.ndarray,
     # axes format
     ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
-    ax.grid(True, alpha=0.4)
+    # ax.grid(True, alpha=0.4)
     ax.set_xlabel("Interdistance [m]")
     ax.set_ylabel("Semivariance [‰²]")
     sns.despine(ax=ax, top=True, right=True)
