@@ -148,9 +148,14 @@ def clean_sisal_data(sisal_dict: dict) -> dict :
     sisal_chrono_df = sisal_dict['sisal_chronology']
     
     #############################
-    # 1) Remove superseded entities and their samples
+    # 1) Remove superseded entities & Devil's Hole site 
     entity_df1 = entity_df.loc[entity_df['entity_status']!='superseded']
-    sample_df1 = sample_df[sample_df["entity_id"].isin(entity_df1["entity_id"].unique())]
+    # remove Devil's Hole cave as it is a unique, very specific cave (underwater slowly growing calcite vein)
+    site_df1 = site_df[site_df.site_name != "Devils Hole"]
+    entity_df2 = entity_df1[entity_df1.site_id.isin(site_df1.site_id.unique())]
+    
+    sample_df1 = sample_df[sample_df["entity_id"].isin(entity_df2["entity_id"].unique())]
+   
     #############################
     # 2) Exclude samples of mixed mineralogy entities :
     #   Find how many different mineralogies exist in the samples of each entity :
@@ -170,14 +175,14 @@ def clean_sisal_data(sisal_dict: dict) -> dict :
 
     ##############################
     # 6) Remove composite entities
-    entity_df2 = entity_df1[~ entity_df1['entity_id'].isin(composite_entity_df['composite_entity_id'])]
-    sample_df5 = sample_df4[sample_df4['entity_id'].isin(entity_df2['entity_id'])]
+    entity_df3 = entity_df2[~ entity_df2['entity_id'].isin(composite_entity_df['composite_entity_id'])]
+    sample_df5 = sample_df4[sample_df4['entity_id'].isin(entity_df3['entity_id'])]
 
     ##############################
     # Final, clean, concording, dataframes
-    final_entity_df = entity_df2[entity_df2["entity_id"].isin(sample_df5["entity_id"])]
+    final_entity_df = entity_df3[entity_df3["entity_id"].isin(sample_df5["entity_id"])]
     final_d18O_df = d18O_df[d18O_df["sample_id"].isin(sample_df5["sample_id"])]
-    final_site_df = site_df[site_df["site_id"].isin(final_entity_df["site_id"])]
+    final_site_df = site_df1[site_df1["site_id"].isin(final_entity_df["site_id"])]
 
     return {'sample': sample_df5,
             'entity': final_entity_df,
@@ -533,7 +538,7 @@ def retrieve_continent_from_lat_lon(df_orig : pd.DataFrame,lat_col :str ='latitu
     df.loc[(df['continent']=='') & (df[lat_col]>= 75) & (df[lat_col]<= 85) & (df[lon_col]>= -30) & (df[lon_col]<= -15),'continent']='North America' # Greenland is on North America plate
     df.loc[(df[lat_col]>= 12)&(df[lat_col]<= 42)&(df[lon_col]>= 32)&(df[lon_col]<= 60),'continent']='Middle East' # Middle East
 
-    continents = df['continent'].unique()
+    # continents = df['continent'].unique()
     # print('-> Continents found in the site df :',continents)
     return df
 
