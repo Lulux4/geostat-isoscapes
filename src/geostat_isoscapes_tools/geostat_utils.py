@@ -326,7 +326,7 @@ def variogram_with_gstat(df : pd.DataFrame,
                          sample_size : int =3000,
                          direction : float | None = None,
                          trend: str|None = None, 
-                         nlags : int = 30, 
+                         nlags : int | None = 30, 
                          maxlag : float | str | None = 'median', 
                          centers : np.ndarray | None = None,
                          model : str ='spherical',
@@ -338,7 +338,7 @@ def variogram_with_gstat(df : pd.DataFrame,
                          y= 'y',
                          plot_interdistances_graph : bool = False,
                          save_interdistances_graphs : str| None = None,
-                         bin_func ='even') :
+                         bin_func :str | None = 'even') :
     """Compute experimental variogram with sampling.
     Inputs : 
         - df : pd.DataFrame, containing x and y columns corresponfing to coordinates in a planar projection, and the data on which to compute the variogram
@@ -385,15 +385,15 @@ def variogram_with_gstat(df : pd.DataFrame,
         # ==============
         # maxlag & nlags
         # ==============
-        if centers is None:
+        if (centers is None) & (nlags is not None) & (bin_func is not None):
             V = skg.Variogram(
                 df[[x,y]].values,#type:ignore
                 vals,
-                n_lags=nlags,
+                n_lags = nlags, #type:ignore
                 # normalize=True,
                 maxlag=maxlag,
                 model=model,
-                bin_func=bin_func,
+                bin_func=bin_func, #type:ignore
                 use_nugget=True
             )
         # ==============
@@ -415,15 +415,15 @@ def variogram_with_gstat(df : pd.DataFrame,
         # ==============
         # maxlag & nlags
         # ==============
-        if centers is None :
+        if (centers is None) & (nlags is not None) :
             V = skg.DirectionalVariogram(
                     df[[x,y]].values,
                     vals,
-                    n_lags=nlags,
+                    n_lags=nlags,#type:ignore
                     maxlag=maxlag,
                     model=model,
                     use_nugget=True,
-                    bin_func=bin_func,
+                    bin_func=bin_func, #type:ignore
                     azimuth=direction, #type:ignore
                     tolerance = tolerance )
         # ==============
@@ -568,8 +568,8 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
                                     tolerance : float = 22.5,
                                     trend : str| None = None,
                                     maxlag : float | None | str = None,
-                                    nlags : int = 20,
-                                    bin_func : str = 'even',
+                                    nlags : int  | None = 20,
+                                    bin_func : str | None = 'even',
                                     mask : pd.DataFrame | None = None,
                                     trend_before_masking : bool = True,
                                     lat: str = 'lat',
@@ -617,6 +617,8 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
         if type(df) is not pd.DataFrame : 
             raise TypeError('data is not of type xr.DataArray, xr.Dataset or pd.DataFrame!')
         
+        # df = df[df.lat<0]
+        
         # If site_name is in df (sisal data), aggregate df by site_name to get only one value per site (mean value)
         if 'site_id' in df.columns:
             df = df.groupby('site_id').agg({lon:'first',lat:'first',quantity:'mean'})
@@ -659,7 +661,9 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
             trend_results[str(t)] = dict_trend
             quantity = 'resid'
             trend = None
-        
+            # NH
+            # df = df[df.lat>0]
+
         # If specified : mask data with provided mask (eg mask itrace to keep only sisal pts neighborhoods)
         if mask is not None :
             # sanity check for the latlon format
@@ -718,6 +722,7 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
         df_all_list = []
         for i,t in enumerate(np.sort(np.unique(np.array(data.time.values)))) : # for all time steps 
             df_iter = pd.DataFrame({'time_slice':t,'lag':ref_bins,'gamma':gammas[i],'count':bin_counts[i]})
+            df_iter.dropna(subset='gamma',inplace=True)
             df_all_list.append(df_iter)
         df_all = pd.concat(df_all_list)
         df_all.to_csv(f'{fp}vario_{direction}_df_all_iterations.csv',index=False)
@@ -790,7 +795,7 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                 else :
                     lon_col='lon'
                 _ = putils.plot_global_map(mask_df[mask_df['mask']==True],'masked data, r=50km','mask','mask','',lon_col=lon_col,lat_col='lat',save_fig=f'{fp}mask_sisal.html')
-               
+              
     # Loop over the different time slices to compute the each variogram
     if verbose : print('Start variogram computation iterations')
     bin_count,gammas, ref_bins, results_dict = iterative_variogram_computations(data,
@@ -800,7 +805,7 @@ def iterate_and_aggregate_variograms(data : xr.DataArray | xr.Dataset | pd.DataF
                                                                                 nlags = config_dict['nlags'],
                                                                                 bin_func=config_dict['bin_func'],
                                                                                 mask = mask_df,
-                                                                                ref_bins = config_dict['centers'],
+                                                                                ref_bins = config_dict['bin_centers'],
                                                                                 direction = config_dict['direction'],
                                                                                 tolerance = config_dict['tolerance'],
                                                                                 trend_before_masking = config_dict['trend_before_mask'],
@@ -1043,23 +1048,24 @@ def get_sisal_data_for_kriging(res : int | None = 200,
     print('sisal dataframe is ready')
     return data_df
 
-def get_preprocessed_itrace_data(res=None,
-                            data_folder = "/media/luluxette/T7_Shield/pdm/iTrace/",
-                            true_kyr=12,
-                            sim_prefix = 'b.e13.Bi1850C5.f19_g16',
-                            sim_kyr = 12,
-                            sim_forcings = 'ice_ghg_orb_wtr',
-                            sim_num = '05',
-                            sim_model = 'clm2.h0',
-                            sim_suffix = '800001-899912',
-                            regions : tuple[str,list[str]]| None = None,
-                            buffer_km : float = 50,
-                            P : bool = False,
-                            d18O : bool = True,
-                            T : bool = False,
-                            format : str = 'df',
-                            amount_weighted=True,
-                            verbose : bool = True) :
+def get_preprocessed_itrace_data(
+        true_kyr,
+        sim_kyr,
+        sim_num : str,
+        sim_suffix :str,
+        res=None,
+        data_folder = "/media/luluxette/T7_Shield/pdm/iTrace/",
+        sim_prefix = 'b.e13.Bi1850C5.f19_g16',
+        sim_forcings = 'ice_ghg_orb_wtr',
+        sim_model = 'clm2.h0',
+        regions : tuple[str,list[str]]| None = None,
+        buffer_km : float = 50,
+        P : bool = False,
+        d18O : bool = True,
+        T : bool = False,
+        format : str = 'df',
+        amount_weighted=True,
+        verbose : bool = True) :
     """ This function loads the iTraCE output file corresponding to the specification provisded in arguments.
     Inputs : 
         - res : temporal resolution in ***YEARS***
@@ -1130,9 +1136,15 @@ def get_preprocessed_itrace_data(res=None,
 
     if format=='df' :
         if P and d18O : subset = ['P','d18Op']
-        elif P :        subset = ['P']
-        elif d18O :     subset = ['d18Op']
-        elif T :        subset = ['TREFHT']
+        elif P :
+            precip_da.name = 'P'  #type:ignore      
+            subset = ['P']
+        elif d18O :     
+            delta18.name = 'd18Op' #type:ignore
+            subset = ['d18Op']
+        elif T :        
+            trefht_da.name = 'T' #type:ignore
+            subset = ['TREFHT']
 
         output= output.to_dataframe().reset_index().dropna(subset=subset) #type:ignore
         
