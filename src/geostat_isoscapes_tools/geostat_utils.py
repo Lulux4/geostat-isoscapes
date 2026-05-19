@@ -109,6 +109,9 @@ def detrend_multiple_linear_regression(df_to_detrend,
         if 'latReLU' in features : 
             df['latReLU'] = np.maximum(0,df[lat_col]) # ReLU -> to create asymetric PW linear activation
             X_cols.append('latReLU')
+        if 'latcosh' in features :
+            df['latcosh'] = np.cosh(0.001*np.radians(df[lat_col])**2) 
+            X_cols.append('latcosh')
     if 'lon' in features:
         X_cols.append(lon_col)
     if 'ele' in features:
@@ -662,7 +665,7 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
             quantity = 'resid'
             trend = None
             # NH
-            # df = df[df.lat>0]
+            # df = df[df.lat<0]
 
         # If specified : mask data with provided mask (eg mask itrace to keep only sisal pts neighborhoods)
         if mask is not None :

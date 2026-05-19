@@ -13,12 +13,13 @@ sns.set_style('dark')
 # Define the experimental setup
 # ==================================
 
-exp_name  = 'run_2026_04_28/runs_wip/' # name of expermiment 
+exp_name  = 'runs_wip/2026-05-18/scaling_factor/' # name of expermiment 
 
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
-# Caves to exclude (sensitivity analysis...), e.g. remove DevilsHole cave as it seems to be wrongly estimated by itrace, leading to very high residuals at cross validation
-# caves_to_exclude = ['Devils Hole','Pacupahuain cave']
+
+# Caves to exclude (sensitivity analysis...)
+# caves_to_exclude = ['Pacupahuain cave']
 caves_to_exclude = []
 
 # Aggregated vario :
@@ -26,9 +27,10 @@ caves_to_exclude = []
 # vario_subfolders = None
 
 # Or all varios :
-vario_path = f'{utils.get_project_root()}/output/variograms/2026-04-14_itrace_wd18O/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
-vario_subfolders = '/res200/maxlag10000000nlags10/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
+vario_path = f'{utils.get_project_root()}/output/variograms/2026-05-18_cosh/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
+vario_subfolders = '/res200/maxlag10000000nlags20/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
 
+scaling_factor = 0.90 
 alpha = 0.10 # max acceptable type I error rate for the Kleijnen test
 
 temperature_ds_name = 'itrace' # 1) 'itrace' for 20-11 ka BP, or 2) 'krapp' for 0-800ka BP with res 1000 years
@@ -170,7 +172,7 @@ for res,kyr in iters :
             if 'nugget' not in list(variogram_dict.keys()): variogram_dict['nugget']=0.0
             
             variogram_parameters = {
-                "sill": variogram_dict[f'sill_{variogram_model}'], 
+                "sill": variogram_dict[f'sill_{variogram_model}']*scaling_factor, 
                 "range": variogram_dict[f'range_{variogram_model}'],  
                 "nugget": variogram_dict['nugget']
             }

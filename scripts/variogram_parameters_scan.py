@@ -13,10 +13,10 @@ sns.set_style('dark')
 # CONFIGURATION
 # ==========================================================================================
 # NAME OF EXPERIMENT
-exp_name = '2026-05-11/test1/anisotropy_SH/'
+exp_name = '2026-05-18/test/'
 
 # DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
-sisal = False
+sisal = True
 itrace = True 
 
 # PARAMETERS LISTS :
@@ -38,11 +38,12 @@ trends = [
     # 'multiple_linear_lat_latquad_ele',
     # 'multiple_linear_lat_latquad_P_D', # /!/ P cannot be retrieved for sisal data
     # 'multiple_linear_lat_latquad_ele_P', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_lat_latquad_ele_D',
+    # 'multiple_linear_lat_latquad_ele_D',
+    'multiple_linear_latcosh_ele_D',    
     # 'multiple_linear_lat_latquad_ele_P_D' # /!/ P cannot be retrieved for sisal data   
     ]
 
-azimuths = [0,90] # 0,45,90,180] # 0 45 90 180 # for directional variograms
+azimuths = [None] # 0,45,90,180] # 0 45 90 180 # for directional variograms
 
 # how to access itrace data ? Need the datafolder (not provided in my repo, see intructions to download it) and the json (provided in repo data/ directory) that contains indications on the filenames.
 itrace_folder = "/media/luluxette/T7_Shield/pdm/iTrace/" # itrace data folder, (absolute path)
@@ -81,9 +82,10 @@ buffer_km = 0 # /!/ continent europe -> set buffer to 0 otherwise it yields pb w
 
 # Variography parameters
 model_name = 'spherical+nugget'
-maxlag = 5e6
-nlags = 15
-bin_func = 'even' #'uniform' # 'even' or 'uniform' # if you want bins defined with a fct
+maxlag = 10e6
+nlags = 20
+bin_func = 'even' # 'even' or 'uniform' # if you want bins defined with a fct
+# or define bin centers directly (overrides maxlag nlags and bin_func)
 # np.power(np.linspace(np.power(0.0, 1.0 / 1.75), np.power(1e7, 1.0 / 1.75), num=16), 1.75)
 large_lags_edges=np.linspace(0.0,10,11)
 large_lags_edges = large_lags_edges[large_lags_edges>4.5]
