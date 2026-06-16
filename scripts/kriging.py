@@ -13,7 +13,7 @@ sns.set_style('dark')
 # Define the experimental setup
 # ==================================
 
-exp_name  = 'runs_wip/2026-05-18/scaling_factor/' # name of expermiment 
+exp_name  = 'runs_wip/2026-06-15-PHIS/vario_n10/' # name of expermiment 
 
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
 ## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
@@ -27,10 +27,10 @@ caves_to_exclude = []
 # vario_subfolders = None
 
 # Or all varios :
-vario_path = f'{utils.get_project_root()}/output/variograms/2026-05-18_cosh/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
-vario_subfolders = '/res200/maxlag10000000nlags20/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
+vario_path = f'{utils.get_project_root()}/output/variograms/2026-06-12-PHIS/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
+vario_subfolders = '/res200/maxlag10000000nlags10/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
 
-scaling_factor = 0.90 
+scaling_factor = 1.0 #0.90 
 alpha = 0.10 # max acceptable type I error rate for the Kleijnen test
 
 temperature_ds_name = 'itrace' # 1) 'itrace' for 20-11 ka BP, or 2) 'krapp' for 0-800ka BP with res 1000 years
@@ -52,7 +52,7 @@ sims = dict((k,itrace_sims[k]) for k in ('12',
                                          '20'
                                          ) if k in itrace_sims)
 
-res_list = [200] # min resolution is 12 months
+res_list = [200] # min resolution is 1 year
 
 verbose = False
 
