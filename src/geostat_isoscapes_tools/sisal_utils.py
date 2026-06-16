@@ -236,7 +236,7 @@ def get_basic_cleaned_merged_sisal_data(verbose=True)-> DataFrame:
     sample_df_clean = clean_dict['sample']
 
     # Merge in one df
-    col_site = ['site_name','longitude','latitude']
+    col_site = ['site_name','longitude','latitude','elevation']
     col_entity = []
     col_sample = ["mineralogy","age","age_method","age_uncert_pos","age_uncert_neg"]
     col_d18O = ['d18O_measurement','d18O_precision']
@@ -253,7 +253,7 @@ def get_basic_cleaned_merged_sisal_data(verbose=True)-> DataFrame:
         )
     if verbose : print('loading and cleaning done.')
 
-    merged_data = merged_data.rename(columns={'latitude':'lat','longitude':'lon'})
+    merged_data = merged_data.rename(columns={'latitude':'lat','longitude':'lon','elevation':'ele'})
 
     return merged_data
 
