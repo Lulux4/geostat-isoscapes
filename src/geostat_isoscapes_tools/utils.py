@@ -146,6 +146,7 @@ def define_d18O_itrace(rain_h2otr_fp,rain_h218o_fp,snow_h2otr_fp,snow_h218o_fp,k
     # delta18 = delta18.assign_coords(time=('time',timearray))
     # delta18 = delta18.assign_coords(time = delta18.time.assign_attrs(units=f"months since start year ({kyr} ka)"))
     delta18 = set_itrace_xarray_time_to_yrBP(delta18, start_year=kyr*1000)
+    delta18 = delta18.astype('float64').assign_coords(lat=delta18.lat.astype('float64').round(3))
 
     return delta18
 
@@ -165,6 +166,7 @@ def define_precipitation_itrace(rain_fp,snow_fp,kyr):
     precip_da = precip_da * 31 * 24 * 3600 # integrate over bin width (natural binwidth is 31 days)
     # Switch the time dimension to yrBP
     precip_da = set_itrace_xarray_time_to_yrBP(precip_da, start_year=kyr*1000)
+    precip_da = precip_da.astype('float64').assign_coords(lat=precip_da.lat.astype('float64').round(3))
 
     return precip_da
 
@@ -174,8 +176,17 @@ def define_temperature_itrace(trefht_fp,kyr):
     trefht_da = load_xarray_datarray(trefht_fp).TREFHT
     # Switch the time dimension to yrBP
     trefht_da = set_itrace_xarray_time_to_yrBP(trefht_da, start_year=kyr*1000)  
+    trefht_da = trefht_da.astype('float64').assign_coords(lat=trefht_da.lat.astype('float64').round(3))
 
     return trefht_da
+
+def define_ele_itrace(phis_fp,kyr):
+    """ This function define the elevation at the surface in iTraCE simulations using the PHIS variable (geopotential)"""
+    phis_da = load_xarray_datarray(phis_fp)
+    ele_da = phis_da.PHIS / 9.81
+    ele_da = set_itrace_xarray_time_to_yrBP(ele_da, start_year=kyr*1000)
+    ele_da = ele_da.astype('float64').assign_coords(lat=ele_da.lat.astype('float64').round(3))
+    return ele_da
 
 # =============================================================================================
 # "Spatial" computations
