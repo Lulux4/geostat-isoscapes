@@ -14,8 +14,9 @@ from matplotlib.axes import Axes
 import matplotlib.gridspec as gridspec
 from collections import OrderedDict
 from matplotlib.colors import Normalize
+from matplotlib.gridspec import GridSpec
 
-def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
+def plot_latlon_platecarree(dataarray_slice: xr.DataArray,
                                      time: str, 
                                      title :str = 'Values of d18Op', 
                                      countries_borders : bool =False,
@@ -53,7 +54,7 @@ def plot_isoscape_latlon_platecarree(dataarray_slice: xr.DataArray,
     ax.set_title(f"{title} {time}")
     return fig, ax
 
-def plot_isoscape_latlon_platecarree_df(
+def plot_latlon_platecarree_df(
         df,
         time: str = '',
         title: str |None = "Values of d18O",
@@ -542,21 +543,31 @@ def plot_platecarree_field_and_scatter_on_top(field_df,
                                               vmax = 0,
                                               figsize=(10,6),
                                               markersize=30,
+                                              fig = None,
+                                              ax = None,
+                                              landcolor="#d8d8d8",
+                                              oceancolor="#dff4fd",
+                                              cmap='plasma'
                                               ):
     """ This function plots a field overlays a scatter plot on top of it. Designed for checking the values of a qty (qty_points) at some locs of the field.
     """
+    if (fig == None) or (ax == None):
+        fig, ax = plt.subplots(figsize=figsize,subplot_kw={"projection": ccrs.PlateCarree()})
+
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.2) #type:ignore
+    ax.add_feature(cfeature.LAND, facecolor=landcolor, edgecolor="none")#type:ignore
+    ax.add_feature(cfeature.OCEAN, facecolor=oceancolor, edgecolor="none")#type:ignore
+    ax.set_axis_off()
+
     # Normalization range
     norm = Normalize(vmin=vmin, vmax=vmax)
-
-    # Plot
-    fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': ccrs.PlateCarree()})
 
     # Plot the field values as colored squares
     scatter_field = ax.scatter(
         field_df[lon],
         field_df[lat],
         c=field_df[qty_field],
-        cmap='plasma',
+        cmap=cmap,
         norm=norm,
         s=markersize,
         marker='s',         # Square markers
@@ -565,21 +576,27 @@ def plot_platecarree_field_and_scatter_on_top(field_df,
     )
 
     # Add colorbar
-    plt.colorbar(scatter_field, ax=ax, label=colorbarlabel)
+    # plt.colorbar(scatter_field, ax=ax, label=colorbarlabel)
+    divider = make_axes_locatable(ax)
+    cax= divider.append_axes("right", size="4%", pad=0.02,axes_class=Axes)
+    cbar = fig.colorbar(scatter_field, cax=cax)
+    cbar.outline.set_visible(False) # type: ignore
+    cbar.set_label(colorbarlabel)
 
     # Overlay the observation points
     ax.scatter(
         points_df[lon],
         points_df[lat],
-        c=points_df[qty_points],
-        cmap='plasma',
+        c=points_df[qty_points] if qty_points in points_df.columns else 'none',
+        cmap=cmap,
         norm=norm,
         s=markersize+20,
-        edgecolor='k',
+        linewidth=0.8,
+        edgecolor="#535353",
         transform=ccrs.PlateCarree()
     )
 
-    ax.coastlines() # type:ignore
+    # ax.coastlines() # type:ignore
     ax.set_title(title)
     return fig,ax
 
@@ -721,3 +738,44 @@ def plot_scatter_with_ci(df,alpha,fp,figsize=(10,10)):
     ax.grid(True,alpha=0.3)
     plt.tight_layout()
     plt.savefig(fp,dpi=400)
+
+
+def plot_trend_res_fields(df,fp):
+    """ Function that plots the original field, detrended field (residual) and the trend (drift) field"""
+    fig = plt.figure(figsize=(14, 18))
+    gs = GridSpec(3, 1, figure=fig, hspace=0.1)
+    oceancolor = "#ffffff"
+    landcolor = "#ffffff"
+
+    ax1 = fig.add_subplot(gs[0, :], projection=ccrs.PlateCarree())
+    ax2 = fig.add_subplot(gs[1, :], projection=ccrs.PlateCarree())
+    ax3 = fig.add_subplot(gs[2, :], projection=ccrs.PlateCarree())
+
+    # Original field
+    plot_latlon_platecarree_df(df=df,
+                               time='',title=None,
+                               countries_borders=False,
+                               qty_col='d18Op',qty_label=r'$\delta^{18}\text{O}_p$',
+                               oceancolor=oceancolor,landcolor=landcolor,
+                               fig=fig,ax=ax1)
+    ax1.text(0.5, -0.06, '(a) Isoscape', transform=ax1.transAxes, fontsize=16, fontweight='bold', va='bottom', ha='right') #type:ignore
+
+    # Trend field
+    plot_latlon_platecarree_df(df=df,
+                               time='',title=None,
+                               countries_borders=False,
+                               qty_col='trend',qty_label='Trend',
+                               oceancolor=oceancolor,landcolor=landcolor,
+                               fig=fig,ax=ax2)
+    ax2.text(0.5, -0.06, '(b) Trend', transform=ax2.transAxes, fontsize=16, fontweight='bold', va='bottom', ha='right') #type:ignore
+
+    # Residual field
+    plot_latlon_platecarree_df(df=df,
+                               time='',title=None,
+                               countries_borders=False,
+                               qty_col='residual',qty_label='Residual',
+                               oceancolor=oceancolor,landcolor=landcolor,
+                               fig=fig,ax=ax3)
+    ax3.text(0.5, -0.06, '(c) Residual field', transform=ax3.transAxes, fontsize=16, fontweight='bold', va='bottom', ha='right') #type:ignore
+    
+    plt.savefig(fp,dpi=300)
