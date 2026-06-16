@@ -73,14 +73,16 @@ def detrend_multiple_linear_regression(df_to_detrend,
                                     ele_col : str| None = "ele",
                                     D_col : str| None = "D",
                                     P_col :str | None = 'P',
+                                    plot_fp : str|None = None,
                                     ):
     """
     Fit and remove a physically-based multiple linear trend:
-    trend = X@a = b0 + b_lat*lat + b_lat2*lat^2 + b_elev*elev + b_dist*dist + b_lon*lon
+    trend = X@a = b0 + b_lat*lat + b_lat2*lat^2 + b_ele*ele + b_dist*dist + b_lon*lon
     Inputs :
         - df : pandas DataFrame. Must contain columns: value_col, lat_col, elev_col, dist_col (+ lon if include_lon=True)
         - include_lon : bool. Whether to include longitude term in the trend model (default False)
         - similar for all include_xxx
+        - plot_fp : str (or None) that indicates where to save the plots of the original field, drift field and residual field
     Outputs:
         - df_out : DataFrame. Copy of df with added columns: 'trend', 'residual'
         - beta : model parameters
@@ -135,6 +137,9 @@ def detrend_multiple_linear_regression(df_to_detrend,
     # df['trend'] = result_dict['y_pred']
     df['residual'] = y - df['trend'].values
 
+    if plot_fp is not None:
+        putils.plot_trend_res_fields(df[[lat_col,lon_col,value_col,'trend','residual']],plot_fp)
+
     return df, result_dict
 
 def fit_multiple_linear_model(exog, y,predictors):
@@ -168,17 +173,6 @@ def fit_multiple_linear_model(exog, y,predictors):
     full_r2 = utils.r2(y,y_pred)
     adj_r2 = utils.r2_adj(y,y_pred,p)
 
-    # partial_r2 = {}
-    # for j in range(X.shape[1]):
-    #     # Remove predictor j
-    #     X_reduced = np.delete(X_full, j+1, axis=1)
-    #     model_reduced = sm.OLS(y, X_reduced).fit()
-    #     ssr_reduced = np.sum(model_reduced.resid**2)
-
-    #     # Partial R square
-    #     r2_j = (ssr_reduced - ssr_full)/sst
-    #     partial_r2[predictors[j]] = r2_j
-    
     # p-values and std
     p_values = dict(zip(["intercept"] + predictors, model_full.pvalues))
     coefficient_std = dict(zip(["intercept"] + predictors, model_full.bse))
@@ -245,7 +239,7 @@ def multiple_linear_result_dict_to_df(result_dict):
     
     return res_df
 
-def trend_removal(trend: str | None,df : pd.DataFrame,quantity : str, verbose: bool = False,lat='lat',lon='lon'):
+def trend_removal(trend: str | None,df : pd.DataFrame,quantity : str, verbose: bool = False,lat='lat',lon='lon',plot_fp : str | None =None):
     """ Fits and remove trend model according to the name of the model passed in argument. Also returns the results (coeffs and metrics) 
     of the fit. """
     if trend is None :
@@ -267,7 +261,8 @@ def trend_removal(trend: str | None,df : pd.DataFrame,quantity : str, verbose: b
                                                                 ele_col = 'ele' if ('ele' in df.columns)&('ele' in trend) else None,
                                                                 D_col = 'D' if ('D' in df.columns)&('D' in trend) else None,
                                                                 P_col = 'P' if ('P' in df.columns)&('P' in trend) else None,
-                                                                features = trend
+                                                                features = trend,
+                                                                plot_fp=plot_fp
                                                                 )
         vals = df_detrended['residual'].values
         if verbose :
@@ -650,22 +645,24 @@ def iterative_variogram_computations(data : xr.DataArray | xr.Dataset | pd.DataF
             if (exog_df is None) :
                 if 'multiple_linear' in str(trend) :
                     variables = trend.split('_') #type:ignore
-                    variables = [v for v in variables if v in ['ele','D']]
-                    cols_exog = np.unique(np.array(variables)).tolist()
-                    cols_exog.extend([lat,lon])
-                    exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon,verbose=False)[cols_exog]
-            df = df.merge(exog_df,on=[lat,lon]) # type:ignore
-            df = df.dropna(axis=0) # clean nans that come from exog variables
+                    variables = [v for v in variables if ((v in ['ele','D']) and not(v in df.columns))]
+                    if len(variables)>0:
+                        cols_exog = np.unique(np.array(variables)).tolist()
+                        cols_exog.extend([lat,lon])
+                        exog_df = add_external_variables_to_lonlat_df(df,variables=variables,lat=lat,lon=lon,verbose=False)[cols_exog]
+            if exog_df is not None:  # just in case the external variables were already in the df  before all of this  
+                df = df.merge(exog_df,on=[lat,lon]) # type:ignore
+                df = df.dropna(axis=0) # clean nans that come from exog variables
 
         # If specified : fit and remove trend here instead of inside variogram_with_gstat
         if (trend is not None) and (trend_before_masking) :
             if verbose : print(f'   removing trend {trend} using all available locations.')
-            df['resid'],dict_trend = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon)
+            df['resid'],dict_trend = trend_removal(trend,df,quantity,verbose=verbose,lat=lat,lon=lon,plot_fp=f'{fp}fig_trend_t{t}.png')
             trend_results[str(t)] = dict_trend
             quantity = 'resid'
             trend = None
             # NH
-            # df = df[df.lat<0]
+            # df = df[df.lat>0]
 
         # If specified : mask data with provided mask (eg mask itrace to keep only sisal pts neighborhoods)
         if mask is not None :
@@ -1064,6 +1061,7 @@ def get_preprocessed_itrace_data(
         regions : tuple[str,list[str]]| None = None,
         buffer_km : float = 50,
         P : bool = False,
+        Ele : bool = False,
         d18O : bool = True,
         T : bool = False,
         format : str = 'df',
@@ -1075,6 +1073,7 @@ def get_preprocessed_itrace_data(
         - format of the output the function : df or xr
         - d18O : whether to give the d18O as output 
         - P : whether to give the precip amount as output
+        - Ele : whether to give the elevation at the surface as output
         - T : whether to give the temperature at the surface as output
         - data_folder : path to the itrace folder on your computer,
         - true_kyr : the kyr slice of the simulation output to load (it does not correspond necessarily to the kyr specified in sim_kyr, which is the name of the kyr slice in the simulation file, and was wrong for the time slice 19kyr...)
@@ -1091,8 +1090,8 @@ def get_preprocessed_itrace_data(
     """
     if verbose : print('loading itrace files')
 
-    if (not P) and (not d18O) and (not T): raise ValueError('At least one of the three variables d18O, P or T must be selected as output of the function!')
-    if (T & P) or (T & d18O) or (T & d18O & P) : raise NotImplementedError('Temperature cannot be selected together with d18O or P for now, because of the way the files are loaded and preprocessed. This can be implemented in the future if needed.')
+    if (not P) and (not d18O) and (not T) and (not Ele): raise ValueError('At least one of the FOUR variables d18O, P, T or Ele must be selected as output of the function!')
+    if (T & P) or (T & d18O) : raise NotImplementedError('Temperature cannot be selected together with d18O or P for now, because of the way the files are loaded and preprocessed. This can be implemented in the future if needed.')
  
     # potential files to find and read :
     fn_merged = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.{sim_model}'
@@ -1103,7 +1102,7 @@ def get_preprocessed_itrace_data(
     fn_itrace_SNOW_H2OTR = f'{fn_merged}.SNOW_H2OTR.{sim_suffix}.nc'    
     fn_itrace_SNOW = f'{fn_merged}.SNOW.{sim_suffix}.nc'
     fn_itrace_TREFHT = f'{fn_merged}.TREFHT.{sim_suffix}.nc' # temperature
-
+    fn_itrace_PHIS = f'{data_folder}{sim_prefix}.{sim_kyr}ka.itrace.{sim_forcings}.{sim_num}.cam.h0.PHIS.{sim_suffix}.nc' # geopotential
     # load files 
     if d18O : 
         delta18 = utils.define_d18O_itrace(fn_itrace_RAIN_H2OTR,fn_itrace_RAIN_H218O,fn_itrace_SNOW_H2OTR,fn_itrace_SNOW_H218O,kyr=true_kyr)
@@ -1111,6 +1110,8 @@ def get_preprocessed_itrace_data(
         precip_da = utils.define_precipitation_itrace(fn_itrace_RAIN,fn_itrace_SNOW,kyr=true_kyr)
     if T : 
         trefht_da = utils.define_temperature_itrace(fn_itrace_TREFHT,kyr=true_kyr)
+    if Ele : 
+        ele_da = utils.define_ele_itrace(fn_itrace_PHIS,kyr=true_kyr)
 
     # bin to desired resolution
     if res is not None :
@@ -1125,20 +1126,28 @@ def get_preprocessed_itrace_data(
         if T :
             trefht_da = utils.bin_xrDataArray_time(trefht_da,res=res, method='median') # type:ignore # T is used for converting d18Oc to d18Op, before any temporal binning -> no need of weighted avg here.
             trefht_da = trefht_da.assign_coords(time=('time',-trefht_da.time.values))
+        if Ele :
+            ele_da = utils.bin_xrDataArray_time(ele_da,res=res, method='median') # type:ignore # T is used for converting d18Oc to d18Op, before any temporal binning -> no need of weighted avg here.
+            ele_da = ele_da.assign_coords(time=('time',-ele_da.time.values))
     
     if regions is not None :
         if d18O : delta18 = utils.mask_regions_shape(delta18,buffer_km=buffer_km,regions=regions)  
         if P :    precip_da = utils.mask_regions_shape(precip_da,buffer_km=buffer_km,regions=regions) 
         if T :    trefht_da = utils.mask_regions_shape(trefht_da,buffer_km=buffer_km,regions=regions) 
-    
+        if Ele :  ele_da = utils.mask_regions_shape(ele_da,buffer_km=buffer_km,regions=regions)
     # define the output and return it
-    if P and d18O : output = xr.Dataset({'d18Op':delta18, 'P': precip_da})
+    if P and d18O and Ele : output = xr.Dataset({'d18Op':delta18,'P':precip_da,'ele': ele_da})
+    elif d18O and Ele : output = xr.Dataset({'d18Op':delta18,'ele': ele_da})
+    elif P and Ele : output = xr.Dataset({'P':precip_da,'ele': ele_da})
+    elif P and d18O : output = xr.Dataset({'d18Op':delta18, 'P': precip_da})
     elif P :        output = precip_da
     elif d18O :     output = delta18
     elif T :        output = trefht_da
-
+    elif Ele :      output  = ele_da
+    
     if format=='df' :
-        if P and d18O : subset = ['P','d18Op']
+        if P and d18O and Ele : subset = ['P','d18Op','ele']
+        elif P and d18O : subset = ['P','d18Op']
         elif P :
             precip_da.name = 'P'  #type:ignore      
             subset = ['P']
@@ -1301,7 +1310,7 @@ def cv_metrics_and_plots(cv_df: pd.DataFrame,fp : str,alpha=0.10):
         json.dump(metrics_dict,file)
     
     # map of error by site
-    putils.plot_isoscape_latlon_platecarree_df(cv_df,time='',
+    putils.plot_latlon_platecarree_df(cv_df,time='',
                                                title=None,
                                                countries_borders=True,
                                                qty_col='residual',
