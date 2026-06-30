@@ -17,11 +17,11 @@ exp_name = '2026-06-12-PHIS/'
 
 # DATASET(S) OF INTEREST FOR THE VARIOGRAPHY :
 sisal = False
-itrace = True 
+itrace = True
 
 # PARAMETERS LISTS :
 mask_itrace_around_sisal_pts = True # variography on itrace masked at sisal points?
-mask_radius = 500
+mask_radius = 300
 
 trends = [
     # 'multiple_linear_ele_D',
@@ -32,15 +32,15 @@ trends = [
     # 'multiple_linear_lat_D',
     # 'multiple_linear_lat_ele_D',
     # None
-    'multiple_linear_lat_latquad',
-    'multiple_linear_lat_latquad_P', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_lat_latquad_D',
-    'multiple_linear_lat_latquad_ele',
-    'multiple_linear_lat_latquad_P_D', # /!/ P cannot be retrieved for sisal data
-    'multiple_linear_lat_latquad_ele_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_lat_latquad',
+    # 'multiple_linear_lat_latquad_P', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_lat_latquad_D',
+    # 'multiple_linear_lat_latquad_ele',
+    # 'multiple_linear_lat_latquad_P_D', # /!/ P cannot be retrieved for sisal data
+    # 'multiple_linear_lat_latquad_ele_P', # /!/ P cannot be retrieved for sisal data
     'multiple_linear_lat_latquad_ele_D',
     # 'multiple_linear_latcosh_ele_D',    
-    'multiple_linear_lat_latquad_ele_P_D' # /!/ P cannot be retrieved for sisal data   
+    # 'multiple_linear_lat_latquad_ele_P_D' # /!/ P cannot be retrieved for sisal data   
     ]
 
 azimuths = [None] # 0,45,90,180] # 0 45 90 180 # for directional variograms

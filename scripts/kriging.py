@@ -13,25 +13,18 @@ sns.set_style('dark')
 # Define the experimental setup
 # ==================================
 
-exp_name  = 'runs_wip/2026-06-15-PHIS/vario_n10/' # name of expermiment 
-
-## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res2400/maxlag8500000nlags15/trend_multiple_linear_latabs_latReLU_ele_D/no_mask/variogram_params_None.json'
-## vario_path = f'{utils.get_project_root()}/output/variograms/itrace/sim12kyrBP/res12/maxlag12000000nlags20/trend_multiple_linear_latabs_latReLU_ele_D/sisal_mask/variogram_params_None.json'
+exp_name  = 'runs_wip/2026-06-22/vario_n10/alpha10_percent/crop_lat_2/' # name of expermiment 
 
 # Caves to exclude (sensitivity analysis...)
 # caves_to_exclude = ['Pacupahuain cave']
 caves_to_exclude = []
-
-# Aggregated vario :
-# vario_path = f'{utils.get_project_root()}/output/variograms/2026-04-14_itrace_wd18O/itrace/vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json'
-# vario_subfolders = None
 
 # Or all varios :
 vario_path = f'{utils.get_project_root()}/output/variograms/2026-06-12-PHIS/itrace/' #vario_res200y_maxlag10e6_nlags15_latlatquadeleD_mask2000.json
 vario_subfolders = '/res200/maxlag10000000nlags10/trend_multiple_linear_lat_latquad_ele_D/sisal_mask_2000km/'
 
 scaling_factor = 1.0 #0.90 
-alpha = 0.10 # max acceptable type I error rate for the Kleijnen test
+alpha = 0.1 # max acceptable type I error rate for the Kleijnen test
 
 temperature_ds_name = 'itrace' # 1) 'itrace' for 20-11 ka BP, or 2) 'krapp' for 0-800ka BP with res 1000 years
 temperature_ds_path = '/media/luluxette/T7_Shield/pdm/iTrace/'
@@ -41,7 +34,8 @@ itrace_folder = '/media/luluxette/T7_Shield/pdm/iTrace/' # abs path to itrace da
 with open(f'{utils.get_project_root()}/data/iTrace_simulations_dict.json', 'r') as f:
     itrace_sims = json.load(f)
 # Keep only the simulations of interest (the keys represent 1000 yr BP slices)
-sims = dict((k,itrace_sims[k]) for k in ('12',
+sims = dict((k,itrace_sims[k]) for k in (
+                                        '12',
                                          '13',
                                          '14',
                                          '15',
@@ -112,13 +106,14 @@ for res,kyr in iters :
 
     # 2. Reload itrace whenever the time slice changes -- bc separate files --
     if (tmp_kyr is None) or (kyr!=tmp_kyr) or (tmp_res!=res): 
-        print(f'..... Loading itrace dataset for {kyr} ka BP at res {res} months')
+        print(f'..... Loading itrace dataset for {kyr} ka BP at res {res} years')
         itrace_data_global = gutils.get_preprocessed_itrace_data(
             true_kyr=int(kyr),
             res=itrace_params['res [years]'],
             data_folder=itrace_folder,
             format='df',
             amount_weighted=True,
+            Ele=True,
             verbose=verbose,
             sim_prefix = itrace_params['Itrace simulation spec']['prefix'],
             sim_suffix =itrace_params['Itrace simulation spec']['suffix'], 
@@ -182,25 +177,22 @@ for res,kyr in iters :
         if any(external_drift_df['lon']>180):
             external_drift_df['lon']=utils.convert_lon_0_360_to_neg180_180(np.asarray(external_drift_df['lon'].values))
         sisal_bin_label = t # deprecated-> bins of sisal are defined as 'N':[N+width yrBP, N yrBP) while itrace is reversed : 'N':(N yrBP, N-width yrBP]...
-        cols_to_keep =['site_name','site_id','lon','lat','d18O_measurement','d18Op','d18O_precision']
+        cols_to_keep =['site_name','site_id','lon','lat','d18O_measurement','d18Op','d18O_precision','ele']
         data_to_krige = sisal_df[ (sisal_df['time']==sisal_bin_label)].copy()[cols_to_keep].groupby('site_name').mean()
 
         # KRIGE ON THE ENTIRE SET OF OBSERVATIONS
         df_pred = gutils.ked(
             df_ext_drift=external_drift_df,
-            df_to_krige=data_to_krige, 
+            df_to_krige=data_to_krige,
             lat='lat',
             lon='lon',
             qty ='d18Op',
             variogram_model=variogram_model,
             variogram_parameters=variogram_parameters
-        )        
+        )
         # CONFIDENCE FLAG
         df_pred['time']=t
-        df_pred['confidence_flag']=1
-        df_pred.loc[df_pred['ss_pred']>8,'confidence_flag']= 2
-        df_pred.loc[df_pred['ss_pred']>16,'confidence_flag']=3
-        
+        df_pred = df_pred[df_pred.lat.between(-62.9,73)]#(-54.2,64.9)] 
         # ADD RESULTS TO DF LIST
         df_list.append(df_pred)
         
@@ -217,35 +209,6 @@ for res,kyr in iters :
         plt.tight_layout()
         plt.savefig(f'{fp_output_yrBP}map_all_predictions.png',dpi=500)   
         
-        fig,axes = putils.plot_ked_platecarree_points(
-            df_pred = df_pred[df_pred.confidence_flag < 3],
-            df_obs = data_to_krige,               
-            value_col = 'd18Op',
-            cmap = 'plasma',
-            s_pred = 80,
-            figsize = (20,4),
-            adjust_extent = False
-        )
-        plt.tight_layout()
-        plt.savefig(f'{fp_output_yrBP}map_masked_predictions.png',dpi=500)   
-        plt.close('all')
-
-        # fig,axes = putils.plot_ked_platecarree_points(
-        #     df_pred = df_pred[df_pred.lat.between(-55,70)],
-        #     df_obs = data_to_krige[data_to_krige.lat.between(-55,70)],               
-        #     value_col = 'd18Op',
-        #     cmap = 'plasma',
-        #     vmin=-33.063114166259766,
-        #     vmax= -1.4799237251281738,
-        #     s_pred = 80,
-        #     figsize = (18,4),
-        #     adjust_extent = False
-        # )
-        # plt.tight_layout()
-
-        # plt.savefig(f'{fp_output_yrBP}map_latS55N70_predictions.png',dpi=500)   
-        # plt.close('all')
-
         # CROSS-VALIDATION LOOP 
         if verbose: print('cross-validation...')
         cvresults_list = []
@@ -266,6 +229,7 @@ for res,kyr in iters :
         
         # LOO METRICS COMPUTATION 
         gutils.cv_metrics_and_plots(cv_df,fp_output_yrBP,alpha=alpha)
+        plt.close('all')
 
 # Aggregate results and save them 
 df = pd.concat(df_list).reset_index(drop=True)
