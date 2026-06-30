@@ -38,7 +38,7 @@ folium @ file:///home/task_175874978220549/conda-bld/folium_1758749948057/work
 fonttools @ file:///home/task_175975424449102/conda-bld/fonttools_1759754872210/work
 fqdn==1.5.1
 geopandas @ file:///home/conda/feedstock_root/build_artifacts/geopandas_1759763141056/work
--e git+https://github.com/Lulux4/geostat-isoscapes.git@7066db2d04f7cbd279c71eb8311ee108eb22a1f4#egg=geostat_isoscapes_tools
+-e git+https://github.com/Lulux4/geostat-isoscapes.git@f1493fed640d7e2e9bee0f4568388c9f6dd02f48#egg=geostat_isoscapes_tools
 gstools @ file:///home/conda/feedstock_root/build_artifacts/gstools_1745930834845/work
 gstools_cython @ file:///home/conda/feedstock_root/build_artifacts/gstools-cython_1758632809801/work
 h11==0.16.0
@@ -113,6 +113,7 @@ platformdirs @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-bui
 plotly @ file:///home/conda/feedstock_root/build_artifacts/plotly_1759457547414/work
 prometheus_client==0.23.1
 prompt_toolkit @ file:///home/conda/feedstock_root/build_artifacts/prompt-toolkit_1756321756983/work
+properscoring==0.1
 psutil @ file:///home/task_175710403608886/conda-bld/psutil_1757104541537/work
 ptyprocess @ file:///home/conda/feedstock_root/build_artifacts/ptyprocess_1733302279685/work/dist/ptyprocess-0.7.0-py2.py3-none-any.whl#sha256=92c32ff62b5fd8cf325bec5ab90d7be3d2a8ca8c8a3813ff487a8d2002630d1f
 pure_eval @ file:///home/conda/feedstock_root/build_artifacts/pure_eval_1733569405015/work

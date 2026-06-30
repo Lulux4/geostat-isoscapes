@@ -1,10 +1,10 @@
-# Geostatistical Isoscapes Reconstruction using Speleothem Data
+# SPIKED : SPeleothem Isoscapes from Kriging with an External Drift 
 
 This repository contains a master's thesis project for reconstructing $\delta^{18}\text{O}_p$ isoscapes using geostatistics applied to speleothem (cave deposit) data. This project integrates paleoclimate simulation data (iTrace simulations) with stable isotope records from the SISAL database to create maps of oxygen isotope composition.
 
 The kriged isoscapes generated are available in file  
 ```
-output/kriging/speleothems_isoscapes_11_to_20kaBP.nc
+output/kriging/spiked_11_to_20kaBP.nc
 ```
 
 ## Overview of the data and methods used in this project
@@ -42,6 +42,7 @@ geostat-isoscapes/
 │   ├── sisal_data_exploration.ipynb
 │   ├── variography.ipynb
 │   ├── kriging.ipynb
+│   ├── lgmr_validation.ipynb
 │   ├── fit_trend_model.ipynb
 │   ├── correlation_analysis.ipynb
 │   └── calcite_to_dripwater_conversion.ipynb
@@ -179,7 +180,7 @@ See `requirements.txt` for full dependency list.
 
 ## Author
 
-**Léa Gainon** (leagainon@gmail.com)
+**Léa Gainon** (leagainon@proton.me, lea.gainon@unil.ch)
 
 Master's Thesis Project, 2025-2026
 
