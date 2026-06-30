@@ -1213,6 +1213,8 @@ def ked(df_to_krige : pd.DataFrame,
         # ... observation that will be in the validation set 
         obs_points_out = np.column_stack((df_validation[lat], df_validation[lon]))
         drift_at_obs_val = griddata(grid_points, df_ext_drift[qty].values, obs_points_out, method='linear')
+        ele_at_obs_itrace_val = griddata(grid_points, df_ext_drift['ele'].values, obs_points_out, method='linear')
+        ele_at_obs_sisal_val = df_validation['ele']
         drift_pred_grid = [drift_at_obs_val]
     else :
         obs_points = np.column_stack((lats_obs, lons_obs))
@@ -1247,6 +1249,8 @@ def ked(df_to_krige : pd.DataFrame,
     if isinstance(cv_mask,np.ndarray):
         df_pred['z_obs']=df_validation[qty].values
         df_pred['drift_at_obs']=drift_at_obs_val
+        df_pred['ele (SISAL)']=ele_at_obs_sisal_val
+        df_pred['ele (iTraCE)']=ele_at_obs_itrace_val
     return df_pred
 
 def compute_ked_metrics_dict(cv_df,alpha=0.10):

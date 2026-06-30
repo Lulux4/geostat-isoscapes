@@ -44,12 +44,22 @@ def prepare_ds_of_ked_isoscsape(ked_df : pd.DataFrame)->xr.Dataset :
         'units': 'per mil squared',
         'description': 'Kriging variance of the d18Op VSMOW after KED interpolation.',
     })
-    ds['confidence_flag'].attrs.update({
-        'description': 'The confidence flag indicates whether the d18O value associated to this point is trustworthy. Best level of confidence is 1 (kriging variance under 8 ‰²), then 2 (under 16 ‰²) and 3. Be cautious when using data with bad confidence.'
-    })
     ds.coords['lon'].attrs.update({'units': 'degrees', 'description': 'Longitude, from -180 degrees (W180) to +180 degrees (E180).'})
     ds.coords['lat'].attrs.update({'units': 'degrees', 'description': 'Latitude, from -90 degrees (S90) to +90 degrees (N90).'})
     ds.coords['time'].attrs.update({'units': 'years', 'description': 'Years before Present (1950). Positive integers.'})
+    
+    # add the information on the within cell altitude variance :
+    std_elev_da = xr.open_dataarray(f"{get_project_root()}/output/std_elev.nc")
+    std_elev_da, ds = xr.align(
+        std_elev_da,
+        ds,
+        join="inner",   # keep only the overlapping coordinates
+        copy=False,
+    )
+    ds = ds.assign(std_elev=std_elev_da)
+    ds["std_elev"].attrs["units"] = "m"
+    ds["std_elev"].attrs["description"] = ("standard deviation of the within-cell elevation computed from a digital elevation model at 1 arc-minute resolution")
+    
     return ds 
 
 
